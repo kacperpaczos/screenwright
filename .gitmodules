@@ -1,0 +1,3 @@
+[submodule "mintinstall"]
+	path = mintinstall
+	url = https://github.com/linuxmint/mintinstall.git
