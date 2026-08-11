@@ -1,3 +1,9 @@
 [submodule "mintinstall"]
 	path = mintinstall
 	url = https://github.com/linuxmint/mintinstall.git
+[submodule "gnome-software"]
+	path = gnome-software
+	url = https://github.com/GNOME/gnome-software.git
+[submodule "discover"]
+	path = discover
+	url = https://github.com/KDE/discover.git

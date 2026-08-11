@@ -102,7 +102,9 @@ Discover reads the AppStream pool at startup, so restart it to see the change.
     poc/make-override.py   AppStream catalogue override generator
     poc/serve.sh           local image server (start|stop|status)
     poc/media/             generated screenshots and thumbnails
-    mintinstall/           clone of Mint's store, source of the deb-path findings
+    mintinstall/           submodule: Mint Software Manager (deb-path screenshot research)
+    gnome-software/        submodule: GNOME Software (screenshot fetch/display reference)
+    discover/              submodule: KDE Discover (screenshot fetch/display reference)
 
 ## Documentation
 
