@@ -1,0 +1,19 @@
+{
+  "apps": ["org.kde.kcalc", "org.gimp.GIMP"],
+  "batch": 2,
+  "dry_run": true,
+  "verify_threshold": 0.85,
+  "templates_dir": null,
+  "distros": [
+    {
+      "name": "fedora-kde",
+      "golden_image": "/var/lib/libvirt/images/golden/fedora-kde.qcow2",
+      "build_artifact": "vm/build/fedora-kde.ks"
+    },
+    {
+      "name": "ubuntu-24.04",
+      "golden_image": "/var/lib/libvirt/images/golden/ubuntu-24.04.qcow2",
+      "build_artifact": "vm/build/ubuntu-24.04.user-data"
+    }
+  ]
+}

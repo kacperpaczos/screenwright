@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+{# Jinja2 template — kanoniczne źródło dla `domains.matrix.domain_xml.render_domain_xml`. #}
+{# Parametry: name, uuid, memory_mib, vcpus, disk_path, mac, graphics, listen.           #}
+<domain type="kvm" xmlns:qemu="http://libvirt.org/schemas/domain/qemu/1.0">
+  <name>{{ name }}</name>
+  <uuid>{{ uuid }}</uuid>
+  <memory unit="MiB">{{ memory_mib }}</memory>
+  <vcpu>{{ vcpus }}</vcpu>
+  <os>
+    <type arch="x86_64">hvm</type>
+    <boot dev="hd"/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+  <devices>
+    <disk type="file" device="disk">
+      <driver name="qemu" type="qcow2"/>
+      <source file="{{ disk_path }}"/>
+      <target dev="vda" bus="virtio"/>
+    </disk>
+    <interface type="network">
+      <source network="default"/>
+      <mac address="{{ mac }}"/>
+      <model type="virtio"/>
+    </interface>
+    <channel type="unix">
+      <target type="virtio" name="org.qemu.guest_agent.0"/>
+    </channel>
+    <video>
+      <model type="virtio"/>
+    </video>
+    <graphics type="{{ graphics }}" autoport="yes" listen="{{ listen }}"/>
+  </devices>
+</domain>

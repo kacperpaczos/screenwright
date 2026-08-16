@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<domain type="kvm" xmlns:qemu="http://libvirt.org/schemas/domain/qemu/1.0">
+  <name>screenwright-fedora-kde-test</name>
+  <uuid>00000000-0000-0000-0000-000000000001</uuid>
+  <memory unit="MiB">4096</memory>
+  <vcpu>2</vcpu>
+  <os>
+    <type arch="x86_64">hvm</type>
+    <boot dev="hd"/>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+  <devices>
+    <disk type="file" device="disk">
+      <driver name="qemu" type="qcow2"/>
+      <source file="/var/lib/libvirt/images/test.qcow2"/>
+      <target dev="vda" bus="virtio"/>
+    </disk>
+    <interface type="network">
+      <source network="default"/>
+      <mac address="52:54:00:00:00:01"/>
+      <model type="virtio"/>
+    </interface>
+    <video>
+      <model type="virtio"/>
+    </video>
+    <graphics type="spice" autoport="yes" listen="127.0.0.1"/>
+    <channel type="spicevmc">
+      <target type="virtio" name="com.redhat.spice.0"/>
+    </channel>
+  </devices>
+</domain>
