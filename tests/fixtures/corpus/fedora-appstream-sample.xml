@@ -1,0 +1,176 @@
+<?xml version='1.0' encoding='utf-8'?>
+<components origin="fedora" version="0.8">
+  <component type="desktop">
+    <id>90-Second-Portraits.desktop</id>
+    <pkgname>90-Second-Portraits</pkgname>
+    <name>90 Second Portraits</name>
+    <summary>Frantic street painting game</summary>
+    <description>
+      <p>90 Second Portraits is a silly speed painting game developed for Ludum Dare 31 Jam competition. Time is money and you have neither! In 90 SECOND PORTRAITS you’re paying the bills by speed painting portraits of bypassing customers! You have 90 seconds to paint the customer and his/her preferred background! Your work day ends after 5 customers!</p>
+    </description>
+    <icon type="cached" height="64" width="64">90-Second-Portraits.png</icon>
+    <icon type="cached" height="128" width="128">90-Second-Portraits.png</icon>
+    <categories>
+      <category>ArcadeGame</category>
+      <category>Game</category>
+    </categories>
+    <kudos>
+      <kudo>HiDpiIcon</kudo>
+    </kudos>
+    <project_license>zlib</project_license>
+    <url type="bugtracker">https://github.com/SimonLarsen/90-Second-Portraits/issues</url>
+    <url type="homepage">http://tangramgames.dk/games/90secondportraits/</url>
+    <screenshots>
+      <screenshot type="default">
+        <caption>Title Screen</caption>
+        <image type="source">http://tangramgames.dk/games/90secondportraits/images/header.png</image>
+      </screenshot>
+      <screenshot>
+        <caption>Example gameplay 1</caption>
+        <image type="source">http://tangramgames.dk/games/90secondportraits/images/1.png</image>
+      </screenshot>
+      <screenshot>
+        <caption>Example gameplay 2</caption>
+        <image type="source">http://tangramgames.dk/games/90secondportraits/images/2.png</image>
+      </screenshot>
+      <screenshot>
+        <caption>Example gameplay 3</caption>
+        <image type="source">http://tangramgames.dk/games/90secondportraits/images/3.png</image>
+      </screenshot>
+      <screenshot>
+        <caption>Example gameplay 4</caption>
+        <image type="source">http://tangramgames.dk/games/90secondportraits/images/4.png</image>
+      </screenshot>
+    </screenshots>
+    <releases>
+      <release timestamp="1692792000" version="1.01b" />
+    </releases>
+    <launchable type="desktop-id">90-Second-Portraits.desktop</launchable>
+  </component>
+  <component type="desktop">
+    <id>Add64.desktop</id>
+    <pkgname>Add64</pkgname>
+    <name>Add64</name>
+    <summary>Additive software sound synthesizer</summary>
+    <description>
+      <p>Add64 is an additive modular software synthesizer for generating sounds. Unlike other software synthesizers -- that use a skeuomorphic interface of knobs, sliders and buttons, Add64 displays a spectral graph and allows the user to modify the oscillators and related parameters.</p>
+    </description>
+    <icon type="cached" height="64" width="64">Add64.png</icon>
+    <categories>
+      <category>Audio</category>
+      <category>AudioVideo</category>
+    </categories>
+    <kudos>
+      <kudo>ModernToolkit</kudo>
+    </kudos>
+    <project_license>GPL-3.0-only</project_license>
+    <url type="homepage">http://www.amsynth.com/add64.html</url>
+    <screenshots>
+      <screenshot type="default">
+        <image type="source">http://www.amsynth.com/images/Add64-Harmonics.png</image>
+      </screenshot>
+    </screenshots>
+    <releases>
+      <release timestamp="1705579200" version="3.9.3" />
+    </releases>
+    <launchable type="desktop-id">Add64.desktop</launchable>
+  </component>
+  <component type="font">
+    <id>AndroidEmoji</id>
+    <pkgname>google-android-emoji-fonts</pkgname>
+    <name>Android Emoji</name>
+    <summary>Emoji font released by Google</summary>
+    <description>
+      <p>The Android Emoji typeface contains a number of pictographs and smileys, popularly used in instant messages and chat forums.  The style of the typeface is playful.  It is taken from Google's Android Jelly Bean mobile phone operating system.</p>
+      <p>This font hasn’t been updated since 2012.  You may well be better served by its replacement, Noto Emoji.</p>
+    </description>
+    <icon type="cached" height="64" width="64">AndroidEmoji.png</icon>
+    <categories>
+      <category>Addons</category>
+      <category>Fonts</category>
+    </categories>
+    <project_license>Apache-2.0</project_license>
+    <url type="homepage">https://android.googlesource.com/platform/frameworks/base.git/+/jb-release/data/fonts/</url>
+    <screenshots>
+      <screenshot type="default">
+        <image type="source" height="675" width="1200">https://src.fedoraproject.org/rpms/google-android-emoji-fonts/raw/master/f/google-android-emoji-fonts.gnome-characters.png</image>
+      </screenshot>
+      <screenshot>
+        <image type="source" height="48" width="640">file:/AndroidEmoji-a0e8f448772cdd04ec823e51146ad664.png</image>
+      </screenshot>
+    </screenshots>
+    <releases>
+      <release timestamp="1705752000" version="1.01" />
+    </releases>
+    <provides>
+      <font>Android Emoji</font>
+    </provides>
+    <languages>
+      <lang>und-zsye</lang>
+    </languages>
+  </component>
+  <component type="shell-extension">
+    <id>Applications_Menu_rmy.pobox.com</id>
+    <pkgname>gnome-shell-extension-frippery-applications-menu</pkgname>
+    <source_pkgname>gnome-shell-frippery</source_pkgname>
+    <translation type="gettext">frippery-applications-menu</translation>
+    <name>Frippery Applications Menu</name>
+    <summary>GNOME Shell Extension</summary>
+    <description>
+      <p>Replace Activities button with an Applications menu</p>
+    </description>
+    <icon type="stock">application-x-addon-symbolic</icon>
+    <categories>
+      <category>Addons</category>
+      <category>ShellExtensions</category>
+    </categories>
+    <project_license>GPL-2.0-or-later</project_license>
+    <url type="homepage">http://frippery.org/extensions</url>
+    <releases>
+      <release timestamp="1743681600" version="48.0" />
+      <release timestamp="1729944000" version="47.0" />
+      <release timestamp="1713441600" version="46.1" />
+      <release timestamp="1711713600" version="46.0" />
+      <release timestamp="1702555200" version="45.1" />
+      <release timestamp="1697025600" version="45.0" />
+      <release version="46" />
+    </releases>
+    <metadata>
+      <value key="shell-extensions::uuid">Applications_Menu@rmy.pobox.com</value>
+    </metadata>
+  </component>
+  <component type="desktop">
+    <id>BlockOutII.desktop</id>
+    <pkgname>BlockOutII</pkgname>
+    <name>BlockOut II</name>
+    <summary>A free adaptation of the original BlockOut game</summary>
+    <description>
+      <p>BlockOut II is a game where the player moves and rotate 3D polycubes that are constantly falling with the objective of clearing layers of blocks. It is a free adaptation of the original BlockOut game released in 1989.</p>
+    </description>
+    <icon type="cached" height="64" width="64">BlockOutII.png</icon>
+    <categories>
+      <category>BlocksGame</category>
+      <category>Game</category>
+    </categories>
+    <keywords>
+      <keyword>blockout</keyword>
+      <keyword>blocks</keyword>
+      <keyword>falling</keyword>
+      <keyword>game</keyword>
+    </keywords>
+    <project_license>GPL-2.0-or-later</project_license>
+    <url type="homepage">http://www.blockout.net/blockout2/</url>
+    <screenshots>
+      <screenshot type="default">
+        <image type="source">http://www.blockout.net/blockout2/screenshots/scr1.jpg</image>
+      </screenshot>
+      <screenshot>
+        <image type="source">http://www.blockout.net/blockout2/screenshots/scr2.jpg</image>
+      </screenshot>
+    </screenshots>
+    <releases>
+      <release timestamp="1705579200" version="2.5" />
+    </releases>
+    <launchable type="desktop-id">BlockOutII.desktop</launchable>
+  </component>
+</components>

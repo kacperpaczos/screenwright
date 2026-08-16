@@ -1,0 +1,14 @@
+{
+  "apps": [
+    {"id": "org.kde.kcalc", "notes": "POC app"},
+    {"id": "org.gimp.GIMP"},
+    {"id": "org.inkscape.Inkscape"},
+    {"id": "org.videolan.VLC"},
+    {"id": "org.audacityteam.Audacity"},
+    {"id": "org.blender.Blender"},
+    {"id": "org.gnome.gedit"},
+    {"id": "org.kde.okular"},
+    {"id": "org.libreoffice.LibreOffice"},
+    {"id": "com.transmissionbt.Transmission"}
+  ]
+}

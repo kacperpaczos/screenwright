@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CorpusIndex",
+  "type": "object",
+  "required": ["schema_version", "entries"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "entries": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/CorpusEntry"}
+    }
+  },
+  "$defs": {
+    "CorpusEntry": {
+      "type": "object",
+      "required": [
+        "app_id", "distro", "source", "source_url", "kind",
+        "width", "height", "fetched", "sha256", "file"
+      ],
+      "properties": {
+        "app_id": {"type": "string", "minLength": 1},
+        "distro": {"enum": ["fedora", "ubuntu", "mint", "elementary", "flathub", "snap", "debian"]},
+        "source": {"type": "string"},
+        "source_url": {"type": "string", "format": "uri"},
+        "kind": {"enum": ["source", "thumbnail"]},
+        "width": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "height": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "fetched": {"type": "string", "format": "date-time"},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "file": {"type": "string"},
+        "pkgname": {"type": ["string", "null"]},
+        "notes": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}
