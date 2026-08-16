@@ -1,0 +1,40 @@
+[importlinter]
+root_packages =
+    domains
+    shared
+    cli
+
+[importlinter:contract:no-domain-to-domain]
+name = no-domain-to-domain
+type = forbidden
+source_modules =
+    domains.corpus
+    domains.capture
+    domains.override
+    domains.matrix
+    domains.verification
+forbidden_modules =
+    domains.corpus
+    domains.capture
+    domains.override
+    domains.matrix
+    domains.verification
+
+[importlinter:contract:shared-no-domains]
+name = shared-no-domains
+type = forbidden
+source_modules = shared
+forbidden_modules =
+    domains.corpus
+    domains.capture
+    domains.override
+    domains.matrix
+    domains.verification
+
+[importlinter:contract:cli-can-import-domains]
+name = cli-can-import-domains
+type = layers
+layers =
+    cli
+    domains.corpus | domains.capture | domains.override | domains.matrix | domains.verification
+    shared

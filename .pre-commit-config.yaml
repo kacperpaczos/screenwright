@@ -1,0 +1,32 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.5
+    hooks:
+      - id: ruff-format
+      - id: ruff-check
+        args: [--fix]
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        additional_dependencies: [pydantic==2.12.5]
+        args: [--config-file=pyproject.toml]
+  - repo: https://github.com/shellcheck-py/shellcheck
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [--strict]
+        types: [file]
+        files: \.(ya?ml)$
+  - repo: local
+    hooks:
+      - id: xmllint
+        name: xmllint
+        entry: bash -c 'find . -name "*.xml" -not -path "./.git/*" -exec xmllint --noout {} +'
+        language: system
+        pass_filenames: false
+        types: [file]
