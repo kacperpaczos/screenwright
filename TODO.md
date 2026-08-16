@@ -4,6 +4,8 @@ High-level product goals beyond the current capture / AppStream override POC.
 
 ## 1. Collect screenshots from major distros
 
+Plan: [docs/plans/1-screenshot-corpus.md](docs/plans/1-screenshot-corpus.md)
+
 Pull (or scrape / catalogue) the **current store screenshots** for the same applications from:
 
 - [ ] **Fedora** (GNOME Software / AppStream catalogues)
@@ -56,6 +58,8 @@ Study how large software stores present screenshots and app media, and extract p
 Deliverable: short design notes (layout, hierarchy, image sizes, carousel vs grid, trust/freshness cues) under `docs/` before building the public site.
 
 ## 6. Automated VM matrix to test our screenshots
+
+Plan: [docs/plans/6-vm-matrix.md](docs/plans/6-vm-matrix.md)
 
 Build an **automatic virtual-machine method** to install/apply our screenshots and verify they appear correctly in the real software centre UI:
 
