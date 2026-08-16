@@ -107,6 +107,29 @@ Deliverable: e.g. `scripts/refresh-screenshot-db.sh` (or equivalent) + README se
 7. GUI for local review
 8. Public website
 
+## Housekeeping
+
+Small, unrelated to the product goals above, but worth clearing.
+
+- [ ] **Clean the reference submodules.** `discover/` (2 files),
+  `gnome-software/` (7) and `mintinstall/` (10) have dirty working trees —
+  reformatted imports, not our edits. They predate the current work and are
+  never staged, so nothing has leaked into a commit, but a dirty submodule
+  makes `git status` noisy and hides real pointer changes. Clear with
+  `git submodule foreach git checkout .`.
+- [ ] **Declare `types-python-xlib` in the dev dependencies.**
+  `domains/capture/x11.py` imports `Xlib`, and `pyproject.toml` lists
+  `types-PyYAML` but not the Xlib stubs, so `mypy` reports
+  `Library stubs not installed for "Xlib"`. CI runs `mypy` in the `lint`
+  job, so this fails there even though it looks like a local-only problem.
+  One line in `[project.optional-dependencies].dev`.
+- Note on running `mypy` locally: two of its complaints are environment,
+  not code. `types-PyYAML` is declared but may not be installed in the
+  active interpreter (`pip install -e ".[dev]"` fixes it), and the numpy
+  stubs shipped for Python 3.14 fail to parse (`Type statement is only
+  supported in Python 3.12 and greater`). CI pins 3.12, where this does
+  not occur.
+
 ## Notes
 
 - Submodules `mintinstall/`, `gnome-software/`, and `discover/` are reference code for **how** stores fetch and display images—use them when implementing collectors, presentation research, and VM checks.
