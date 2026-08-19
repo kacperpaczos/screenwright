@@ -42,7 +42,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["domains*", "shared*", "cli*"]
+include = ["domains*", "shared*", "cli*", "vm*"]
 exclude = ["tests*", "poc*"]
 
 [tool.ruff]
@@ -73,6 +73,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = [
     "-ra",
     "--strict-markers",
@@ -80,6 +81,7 @@ addopts = [
     "--cov=domains",
     "--cov=shared",
     "--cov=cli",
+    "--cov=vm",
     "--cov-report=term-missing",
 ]
 markers = [
@@ -91,11 +93,13 @@ markers = [
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:lxml.*",
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+    "ignore::DeprecationWarning:starlette.*",
 ]
 
 [tool.coverage.run]
 branch = true
-source = ["domains", "shared", "cli"]
+source = ["domains", "shared", "cli", "vm"]
 omit = [
     "*/adapters/*",
     "*/distro_builders/elementary.py",
