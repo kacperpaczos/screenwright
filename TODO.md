@@ -63,10 +63,9 @@ Plan: [docs/plans/6-vm-matrix.md](docs/plans/6-vm-matrix.md)
 
 Build an **automatic virtual-machine method** to install/apply our screenshots and verify they appear correctly in the real software centre UI:
 
-- [ ] **Fedora** (GNOME Software)
-- [ ] **Ubuntu** (default store path(s))
-- [ ] **GNOME** desktop + GNOME Software (if not already covered by Fedora/Ubuntu spins)
-- [ ] **KDE** (Discover)
+- [x] **Fedora Workstation** (GNOME Software 50.0) — built, booted, store opened
+- [x] **Fedora KDE** (Discover 6.6.4) — built, booted, store opened
+- [x] **Ubuntu 24.04** (snap-store 1390 **and** GNOME Software 46.0) — built, booted
 - [ ] **Linux Mint** (mintinstall)
 - [ ] **elementary OS** (AppCenter)
 
@@ -77,6 +76,108 @@ Goals:
 - automated or semi-automated visual check that the store shows the intended shot
 
 Deliverable: VM definitions + orchestration scripts + a short “how to run the matrix” doc.
+
+### Where we stand (2026-08-18)
+
+Three golden images exist and were each verified live: autologin into a
+graphical session, SSH on a key, `qemu-guest-agent` responding, and the store
+opened by **the command our own driver emits**, captured with
+`virsh screenshot`. Evidence:
+[`docs/media/store-delivery-2026-08-18/`](docs/media/store-delivery-2026-08-18/).
+
+Everything runs **without root**: `qemu:///session`, images under
+`~/.local/share/screenwright/images`, usermode networking via passt, SSH
+through a per-domain forwarded port. Nothing in the pipeline needs admin
+rights — `/dev/kvm` is world-accessible and libguestfs works unprivileged.
+
+| Image | Size | Contents |
+| --- | --- | --- |
+| `ubuntu-24.04.qcow2` | 4.1 G | ubuntu-desktop, gnome-software, snap-store |
+| `fedora-ws.qcow2` | 6.0 G | GNOME, GNOME Software |
+| `fedora-kde.qcow2` | 9.1 G | Plasma, Discover |
+
+Rebuild with (no `sudo`, ~2 h total, unattended):
+
+```bash
+vm/build/build-keypair.sh
+vm/build/install-fedora.sh ws
+vm/build/install-fedora.sh kde
+vm/build/seed-ubuntu.sh
+```
+
+Traps found the hard way while getting there, all fixed in the installers and
+covered by tests — worth knowing before touching this again:
+
+- Cloud/server images have **no store at all**; `virsh screenshot` captures a
+  login prompt. Golden images must be full desktop installs.
+- Fedora 44 KDE replaced SDDM with **`plasma-login-manager`**, which reads
+  `/etc/plasmalogin.conf.d/`. An autologin file in `/etc/sddm.conf.d/` is
+  silently ignored, and `plasma-setup.service` grabs seat0 before autologin.
+- First-run chrome covers the store on every capture: `gnome-initial-setup`
+  and `update-notifier` on Ubuntu, `gnome-tour` on Fedora WS,
+  `plasma-welcome` on KDE.
+- Fedora's `wheel` still prompts for a password, so `sudo` over SSH without a
+  TTY fails — the installers add an explicit NOPASSWD rule.
+- `virt-sparsify` fails on these images (`Read-only file system`); the build
+  falls back to `qemu-img convert -c`, which never mounts the guest.
+
+### Still to do here
+
+- [ ] Run the full matrix end to end and confirm the report references real
+      framebuffer PNGs, not 70-byte `FakeBackend` placeholders.
+- [ ] Suppress Discover's "Update Issue" modal (it pops over the store page).
+- [ ] Rebuild `fedora-kde.qcow2` cleanly — the current one is 9.1 G because a
+      killed `virt-sparsify` had already zero-filled part of the free space.
+- [ ] Keep builds sequential: three concurrent installs exhausted host RAM and
+      the OOM killer took one down mid-compression.
+
+### Answered: delivery follows the distro, not the store
+
+Measured on live VMs 2026-08-18 — full write-up with URLs and probes:
+[docs/store-screenshot-delivery.md](docs/store-screenshot-delivery.md).
+
+- **Store engine is irrelevant.** Discover and GNOME Software on Fedora return
+  byte-identical screenshot URLs (same md5) — both read `fedora.xml.gz`.
+- **Distro decides everything.** The *same* GNOME Software on Ubuntu uses
+  DEP-11 YAML, `appstream.ubuntu.com` and a different file-naming scheme.
+- **Packaging format overrides both.** Snap entries bypass AppStream entirely
+  (snapd → `dashboard.snapcraft.io`).
+
+So the override must be built **per distribution**, not per store — and snap
+entries stay out of reach of any AppStream override.
+
+Caveat recorded during the measurement: `appstream.ubuntu.com` is serving an
+**expired TLS certificate** (expired 2026-07-31), so on Ubuntu no AppStream
+screenshot loads today. `curl -k` returns the file fine, so it is a Canonical
+outage, not our bug — but it makes deb-path comparisons on Ubuntu unreliable
+until it is renewed.
+
+- [ ] **Verify an XML override lands on Ubuntu.** `GzipXmlCatalogLoader` reads
+      only `*.xml.gz`, which fits Fedora. Ubuntu's source catalog is DEP-11
+      YAML, but Ubuntu *does* have `/usr/share/swcatalog/xml/`, so our XML
+      override plausibly wins on priority anyway. Untested.
+
+### Runner gap: one store per distro
+
+`_DRIVERS_BY_DISTRO` maps one driver per `DistroName`, so Ubuntu can currently
+drive either snap-store or GNOME Software, not both in one run. Comparing the
+two stores on the same machine needs a store dimension in `MatrixRunSpec`
+(distro × store), not just distro.
+
+### Decided: AppStream override, not snap-store-proxy
+
+The live measurement settled this. AppStream override covers GNOME Software
+**and** Discover with one mechanism, and `docs/appstream-overrides.md` already
+proves it works (full component at `priority="1"`; `merge="replace"` does not
+touch screenshots).
+
+`domains/matrix/store_proxy.py` stays in the tree — it now matches the Snap
+Store API v2 shape and is verified end-to-end over HTTP (fetch → replace →
+re-fetch) — but it is **parked**, because there is no verified way to point
+snapd at it: `proxy.store` takes a store ID resolved from a signed `store`
+assertion, not a URL, and we do not have a brand account. Snap-packaged apps
+therefore stay outside the override's reach until someone decides they are in
+scope.
 
 ## 7. One-click refresh of the screenshot database
 
