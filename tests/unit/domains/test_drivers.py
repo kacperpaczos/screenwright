@@ -44,8 +44,9 @@ class TestUbuntuDriver:
         assert UbuntuDriver.distro == DistroName.UBUNTU
 
     def test_unsupported_returns_empty(self) -> None:
-        # TODO §3 — do czasu rozstrzygnięcia jawna decyzja "nieobsługiwane".
-        assert UbuntuDriver().commands_for("org.kde.kcalc") == []
+        # TODO §3 — snap-store jest wspierany; unknown app_id bez mapowania
+        # → pusta lista (driver pomija krok qemu-agent-exec).
+        assert UbuntuDriver().commands_for("org.example.Unknown") == []
 
 
 class TestMintInstallDriver:
