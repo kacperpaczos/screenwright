@@ -25,6 +25,20 @@ class DistroSpec(BaseModel):
     build_artifact: Path | None = None
     installer_iso: HttpUrl | None = None
     domain_overrides: dict[str, Any] = Field(default_factory=dict)
+    store_proxy: Literal["snap-store"] | None = None
+    seed_iso: Path | None = None
+    """NoCloud seed ISO podpinane jako cdrom przy tworzeniu domeny.
+
+    cloud-init w gościu szuka wolumenu z etykietą ``cidata``; bez podpięcia
+    seed ISO do domeny (a nie tylko na czas ``virt-customize``) user-data
+    nigdy nie zostanie zaaplikowane. Patrz ``vm/build/seed-ubuntu.sh``.
+    """
+
+    @field_validator("golden_image", "build_artifact", "seed_iso", mode="after")
+    @classmethod
+    def _expand_user(cls, v: Path | None) -> Path | None:
+        """`~` w spec JSON-ie ma działać — obrazy leżą w HOME (tryb session)."""
+        return v.expanduser() if v is not None else None
 
 
 class DomainConfig(BaseModel):
@@ -37,6 +51,14 @@ class DomainConfig(BaseModel):
     graphics: Literal["spice", "vnc"] = "vnc"
     listen: str = "127.0.0.1"
     enable_3d: Literal[False] = False
+    ssh_port: int = Field(ge=1024, le=65535, default=2222)
+    """Port na 127.0.0.1 przekierowany do portu 22 gościa (passt).
+
+    W ``qemu:///session`` gość siedzi za usermode NAT-em i nie ma adresu
+    osiągalnego z hosta, więc bez tego przekierowania nie ma jak wejść po
+    SSH. Runner nadaje każdej domenie wolny port, żeby dwie równoległe
+    maszyny się nie pobiły.
+    """
 
 
 class MatrixRunSpec(BaseModel):

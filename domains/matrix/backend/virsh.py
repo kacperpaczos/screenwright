@@ -12,6 +12,7 @@ import time
 from typing import TYPE_CHECKING
 
 from shared.logging import log_entry
+from shared.settings import DEFAULT_LIBVIRT_URI
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 class VirshBackend:
     """Wywołuje `virsh` i `qemu-img` z subprocess (tylko gdy uruchomiony w buildzie)."""
 
-    def __init__(self, uri: str = "qemu:///system") -> None:
+    def __init__(self, uri: str = DEFAULT_LIBVIRT_URI) -> None:
         self._uri = uri
 
     def _run(
@@ -29,11 +30,12 @@ class VirshBackend:
         *,
         stdin: str | None = None,
         timeout: float | None = None,
+        check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         log_entry(20, "matrix.virsh", args=args)
         return subprocess.run(
             ["virsh", "-c", self._uri, *args],
-            check=True,
+            check=check,
             capture_output=True,
             text=True,
             input=stdin,
@@ -126,8 +128,19 @@ class VirshBackend:
                 },
             }
         )
-        exec_result = self._run(["qemu-agent-command", name, exec_payload], timeout=timeout)
+        exec_result = self._run(
+            ["qemu-agent-command", name, exec_payload], timeout=timeout, check=False
+        )
+        if exec_result.returncode != 0 or not exec_result.stdout.strip():
+            err = exec_result.stderr.strip() or "empty stdout"
+            raise RuntimeError(
+                f"guest-exec on {name} failed (virsh exit={exec_result.returncode}): {err}"
+            )
         exec_resp = json.loads(exec_result.stdout)
+        if "return" not in exec_resp or "pid" not in exec_resp.get("return", {}):
+            raise RuntimeError(
+                f"guest-exec on {name} returned unexpected response: {exec_result.stdout!r}"
+            )
         pid = exec_resp["return"]["pid"]
 
         deadline = time.monotonic() + timeout

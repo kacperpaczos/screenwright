@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_LIBVIRT_URI = "qemu:///session"
+
+
+def _default_image_root() -> Path:
+    """Katalog obrazów w HOME — tryb session nie ma praw do /var/lib/libvirt."""
+    return Path.home() / ".local" / "share" / "screenwright" / "images"
 
 
 class Settings(BaseSettings):
@@ -26,6 +34,12 @@ class Settings(BaseSettings):
     matrix_output_dir: Path = Path("vm/reports")
     matrix_default_batch: int = 2
 
+    # Domyślnie sesja użytkownika: cały matrix chodzi bez roota. `qemu:///system`
+    # wymagałby praw admina do gniazda libvirtd i do /var/lib/libvirt/images,
+    # a nic w tym projekcie tego nie potrzebuje.
+    libvirt_uri: str = DEFAULT_LIBVIRT_URI
+    image_root: Path = Field(default_factory=_default_image_root)
+
     capture_display_num: int = 96
     capture_screen: str = "1600x1200x24"
 
@@ -42,4 +56,4 @@ def load_settings() -> Settings:
     return Settings()
 
 
-__all__ = ["Settings", "load_settings"]
+__all__ = ["DEFAULT_LIBVIRT_URI", "Settings", "load_settings"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import socket
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -28,7 +29,12 @@ if TYPE_CHECKING:
 
     from shared.types import AppId
 
-    from domains.matrix.ports import ReporterSink, StoreDriver
+    from domains.matrix.ports import (
+        ReporterSink,
+        StoreDriver,
+        StoreProxyLifecycle,
+        StoreProxyProvider,
+    )
 
 
 @runtime_checkable
@@ -105,6 +111,7 @@ def execute(
     matcher: TemplateMatcherPort | None = None,
     reporter: ReporterSink | None = None,
     work_root: Path = Path("/tmp/screenwright-matrix"),
+    store_proxy_provider: StoreProxyProvider | None = None,
 ) -> MatrixReport:
     """Wykonuje przebieg matrycy. W trybie dry_run NIE wywołuje backendu.
 
@@ -112,6 +119,11 @@ def execute(
     listy sprawdzane są w tej samej VM (store przełączany przez driver).
     Ciepły start w obrębie przebiegu jest darmowy; save/restore jest
     capability backendu (do optymalizacji między przebiegami).
+
+    ``store_proxy_provider`` jest wywoływany per-dystrybucja; jeśli zwróci
+    obiekt ``StoreProxyLifecycle``, runner wywołuje ``start()`` przed pętlą
+    po apps i ``stop()`` po (również przy wyjątkach). W ``dry_run`` provider
+    nie jest używany — pętla mockuje brak proxy.
     """
     if backend is None:
         backend = FakeBackend()
@@ -126,9 +138,17 @@ def execute(
 
     for distro in spec.distros:
         name = make_unique_name(f"sw-{distro.name.value}")
-        domain = _domain_for(distro.name).model_copy(update={"name": name})
+        domain = _domain_for(distro.name).model_copy(
+            update={"name": name, "ssh_port": pick_ssh_port()}
+        )
         disk_path = _disk_path(work_root if not spec.dry_run else Path("/tmp/dry"), distro.name)
-        xml = render_domain_xml(domain, disk_path)
+        xml = render_domain_xml(domain, disk_path, cdrom_path=distro.seed_iso)
+
+        proxy: StoreProxyLifecycle | None = None
+        if not spec.dry_run and store_proxy_provider is not None:
+            proxy = store_proxy_provider(distro, spec.apps)
+            if proxy is not None:
+                proxy.start()
 
         if not spec.dry_run:
             backend.create_overlay(distro.golden_image, disk_path)
@@ -167,6 +187,8 @@ def execute(
         finally:
             if not spec.dry_run:
                 _teardown(backend, name, disk_path)
+            if proxy is not None:
+                proxy.stop()
 
     return MatrixReport(
         run_id=run_id,
@@ -174,6 +196,17 @@ def execute(
         finished_at=datetime.now(UTC),
         results=results,
     )
+
+
+def pick_ssh_port() -> int:
+    """Wolny port na 127.0.0.1 pod przekierowanie SSH do gościa.
+
+    Dwie domeny w jednym przebiegu nie mogą dostać tego samego portu —
+    passt nie wstanie, a błąd wyszedłby dopiero przy starcie drugiej VM.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 def _teardown(backend: LibvirtBackend, name: str, disk_path: Path) -> None:

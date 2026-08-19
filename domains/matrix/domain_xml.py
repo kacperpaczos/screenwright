@@ -27,10 +27,25 @@ TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
       <source file="{{ disk_path | e }}"/>
       <target dev="vda" bus="virtio"/>
     </disk>
-    <interface type="network">
-      <source network="default"/>
+    {% if cdrom_path %}
+    <disk type="file" device="cdrom">
+      <driver name="qemu" type="raw"/>
+      <source file="{{ cdrom_path | e }}"/>
+      <target dev="sda" bus="sata"/>
+      <readonly/>
+    </disk>
+    {% endif %}
+    <!-- Sieć usermode (passt): w qemu:///session nie ma sieci `default`,
+         bo to zasób systemowego libvirtd. passt działa bez roota, a gość
+         nie jest routowalny z hosta — dlatego SSH jedzie przez jawne
+         przekierowanie portu na 127.0.0.1. -->
+    <interface type="user">
+      <backend type="passt"/>
       <mac address="{{ mac | e }}"/>
       <model type="virtio"/>
+      <portForward proto="tcp" address="127.0.0.1">
+        <range start="{{ ssh_port }}" to="22"/>
+      </portForward>
     </interface>
     <channel type="unix">
       <target type="virtio" name="org.qemu.guest_agent.0"/>
@@ -44,7 +59,11 @@ TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def render_domain_xml(config: DomainConfig, disk_path: Path) -> str:
+def render_domain_xml(
+    config: DomainConfig,
+    disk_path: Path,
+    cdrom_path: Path | None = None,
+) -> str:
     env = Environment(undefined=StrictUndefined)
     template = env.from_string(TEMPLATE)
     return template.render(
@@ -53,9 +72,11 @@ def render_domain_xml(config: DomainConfig, disk_path: Path) -> str:
         memory_mib=config.memory_mib,
         vcpus=config.vcpus,
         disk_path=str(disk_path),
+        cdrom_path=str(cdrom_path) if cdrom_path else None,
         mac=_mac(),
         graphics=config.graphics,
         listen=config.listen,
+        ssh_port=config.ssh_port,
     )
 
 
