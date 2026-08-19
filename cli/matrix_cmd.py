@@ -1,6 +1,7 @@
 """CLI subcommand: matrix (TODO §6)."""
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from domains.matrix.drivers import (
     UbuntuDriver,
 )
 from domains.matrix.models import DistroName, DistroSpec, MatrixRunSpec
-from domains.matrix.ports import StoreDriver
+from domains.matrix.ports import StoreDriver, StoreProxyLifecycle, StoreProxyProvider
 from domains.matrix.runner import (
     TemplateMatcherPort,
 )
@@ -24,9 +25,11 @@ from domains.matrix.runner import (
 from domains.matrix.runner import (
     plan as matrix_plan,
 )
+from domains.matrix.store_proxy import SnapInfo, SnapMedia, StoreProxyConfig, StoreProxyServer
 from shared.logging import log_entry
 from shared.ports import LibvirtBackend
 from shared.results import MatrixReport, Score
+from shared.types import AppId
 
 
 def _load_spec(args: argparse.Namespace) -> MatrixRunSpec:
@@ -117,6 +120,7 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
         backend: LibvirtBackend = _make_backend(args)
         matcher: TemplateMatcherPort = _make_matcher(spec.verify_threshold)
         drivers = _drivers_for_spec(spec)
+        provider = _make_store_proxy_provider(args)
     except (FileNotFoundError, Exception) as exc:
         if isinstance(exc, FileNotFoundError):
             return 2
@@ -130,7 +134,13 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
             note="żadna dystrybucja w specu nie ma drivera — krok qemu-agent-exec pominięty",
         )
 
-    report = matrix_execute(spec, backend=backend, matcher=matcher, drivers=drivers)
+    report = matrix_execute(
+        spec,
+        backend=backend,
+        matcher=matcher,
+        drivers=drivers,
+        store_proxy_provider=provider,
+    )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
@@ -139,6 +149,72 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
     )
     log_entry(20, "cli.matrix.execute.done", path=str(output_path), results=len(report.results))
     return 0
+
+
+def _make_store_proxy_provider(args: argparse.Namespace) -> StoreProxyProvider | None:
+    """Konstruuje provider proxy dla dystrybucji z DistroSpec.store_proxy != None."""
+
+    proxy_port = getattr(args, "store_proxy_port", None)
+    cli_serve_base = getattr(args, "cli_serve_base", None)
+
+    media_dir = Path(getattr(args, "media_dir", None) or "poc/media")
+
+    def provider(distro: DistroSpec, apps: list[AppId]) -> StoreProxyLifecycle | None:
+        if distro.store_proxy != "snap-store":
+            return None
+        base = cli_serve_base or "http://127.0.0.1:8899"
+        manifest = _build_snap_manifest(apps, base, media_dir)
+        port = proxy_port or 8900
+        config = StoreProxyConfig(manifest=manifest, base_url=base, port=port)
+        return StoreProxyServer(config)
+
+    return provider
+
+
+def media_urls_for(app: AppId, base_url: str, media_dir: Path) -> list[str]:
+    """URL-e screenshotów dla appki — tylko dla plików, które realnie istnieją.
+
+    ``cli serve --directory poc/media`` serwuje pliki **z korzenia**
+    (``GET /org.kde.kcalc.png``), nie spod ``/screenshots/``. Budowanie URL-i
+    z prefiksem dawało 404 na każdym medium. Zwracamy wyłącznie istniejące
+    pliki, żeby manifest nigdy nie reklamował martwego URL-a.
+    """
+    base = base_url.rstrip("/")
+    names = [f"{app}.png", *sorted(p.name for p in media_dir.glob(f"{app}-*.png"))]
+    return [f"{base}/{name}" for name in names if (media_dir / name).is_file()]
+
+
+def _build_snap_manifest(apps: list[AppId], base_url: str, media_dir: Path) -> dict[str, SnapInfo]:
+    """Mapuje AppId → wpis manifestu kluczowany **nazwą snapu**.
+
+    Nazwa snapu pochodzi z ``UbuntuDriver.SNAP_NAME_MAP`` — jedynego miejsca,
+    które wie, jak AppStream AppId przekłada się na nazwę w Snap Store. Appki
+    bez mapowania są pomijane: driver i tak nie umie ich otworzyć, więc wpis
+    w manifeście byłby martwy.
+
+    ``snap_id`` pozostaje deterministycznym zastępnikiem (nie znamy realnych
+    id dla pilot apps). Ścieżka ``/v2/snaps/info`` adresuje po nazwie, więc
+    zastępnik jej nie psuje; dotyczy tylko ``/v2/snaps/refresh``, którego bez
+    realnych id nie da się dziś obsłużyć — patrz ostrzeżenie w
+    ``domains/matrix/store_proxy``.
+    """
+    out: dict[str, SnapInfo] = {}
+    for app in apps:
+        snap_name = UbuntuDriver.SNAP_NAME_MAP.get(app)
+        if snap_name is None:
+            log_entry(30, "cli.matrix.store_proxy.no_snap_mapping", app=app)
+            continue
+        urls = media_urls_for(app, base_url, media_dir)
+        if not urls:
+            log_entry(30, "cli.matrix.store_proxy.no_media", app=app, media_dir=str(media_dir))
+        out[snap_name] = SnapInfo(
+            snap_id="snap_" + hashlib.sha256(app.encode("utf-8")).hexdigest()[:16],
+            name=snap_name,
+            title=app,
+            media=[SnapMedia(url=url) for url in urls],
+            description=f"screenwright manifest for {app}",
+        )
+    return out
 
 
 __all__ = ["run_matrix_execute", "run_matrix_plan"]

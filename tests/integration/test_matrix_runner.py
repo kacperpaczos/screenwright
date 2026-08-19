@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from domains.matrix.backend.fake import FakeBackend
 from domains.matrix.models import DistroName, DistroSpec, MatrixRunSpec
-from domains.matrix.runner import _default_matcher, execute, plan
+from domains.matrix.runner import _default_matcher, _teardown, execute, plan
 
 
 def _spec(distros: list[DistroSpec], apps: list[str]) -> MatrixRunSpec:
@@ -277,3 +277,199 @@ class TestMatrixRunner:
         # actual is the captured screenshot from FakeBackend (may not exist on disk)
         assert actual_path.name.endswith(".png")
         assert len(report.results) == 1
+
+
+class TestTeardown:
+    """`_teardown` leci z `finally` — nie wolno mu rzucić, cokolwiek się stanie."""
+
+    def test_removes_overlay_even_when_destroy_fails(self, tmp_path: Path) -> None:
+        overlay = tmp_path / "overlay.qcow2"
+        overlay.write_bytes(b"x")
+        backend = FakeBackend(raise_on={"destroy"})
+        _teardown(backend, "sw-nieistniejaca", overlay)
+        assert not overlay.exists()
+
+    def test_removes_overlay_directory(self, tmp_path: Path) -> None:
+        overlay_dir = tmp_path / "overlay-dir"
+        (overlay_dir / "nested").mkdir(parents=True)
+        _teardown(FakeBackend(), "sw-d", overlay_dir)
+        assert not overlay_dir.exists()
+
+    def test_missing_overlay_is_not_an_error(self, tmp_path: Path) -> None:
+        _teardown(FakeBackend(), "sw-d", tmp_path / "nigdy-nie-istniala.qcow2")
+
+    def test_unlink_failure_is_swallowed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        overlay = tmp_path / "overlay.qcow2"
+        overlay.write_bytes(b"x")
+
+        def _boom(self: Path) -> None:
+            raise OSError("read-only filesystem")
+
+        monkeypatch.setattr(Path, "unlink", _boom)
+        _teardown(FakeBackend(), "sw-d", overlay)  # nie może rzucić
+
+
+class TestSeedIsoAttachment:
+    """`DistroSpec.seed_iso` musi trafić do XML-a domeny jako cdrom.
+
+    Bez tego cloud-init w gościu nie widzi wolumenu `cidata`, więc user-data
+    (desktop, snap-store, autologin) nigdy się nie aplikuje — VM wstaje na
+    goły serwer i test sklepu jest niewykonalny.
+    """
+
+    def _run(self, tmp_path: Path, seed_iso: Path | None) -> str:
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[
+                DistroSpec(
+                    name=DistroName.UBUNTU,
+                    golden_image=tmp_path / "g.qcow2",
+                    seed_iso=seed_iso,
+                )
+            ],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        backend = FakeBackend()
+        execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        (domain,) = backend.domains.values()
+        return domain.xml
+
+    def test_seed_iso_is_attached_as_cdrom(self, tmp_path: Path) -> None:
+        seed = tmp_path / "ubuntu-seed.iso"
+        seed.write_bytes(b"iso")
+        xml = self._run(tmp_path, seed)
+        assert 'device="cdrom"' in xml
+        assert str(seed) in xml
+
+    def test_no_cdrom_when_seed_iso_absent(self, tmp_path: Path) -> None:
+        xml = self._run(tmp_path, None)
+        assert 'device="cdrom"' not in xml
+
+
+class TestStoreProxyIntegration:
+    def test_provider_returns_none_no_proxy_calls(self, tmp_path: Path) -> None:
+        from domains.matrix.ports import StoreProxyLifecycle
+
+        class _TrackingProvider:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, list[str]]] = []
+
+            def __call__(self, distro, apps) -> StoreProxyLifecycle | None:  # type: ignore[type-arg]
+                self.calls.append((distro.name.value, list(apps)))
+                return None
+
+        provider = _TrackingProvider()
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[DistroSpec(name=DistroName.UBUNTU, golden_image=tmp_path / "g.qcow2")],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        backend = FakeBackend()
+        execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            store_proxy_provider=provider,
+            work_root=tmp_path,
+        )
+        assert provider.calls == [("ubuntu-24.04", ["org.kde.kcalc"])]
+
+    def test_provider_returns_proxy_start_and_stop_called(self, tmp_path: Path) -> None:
+
+        class _FakeProxy:
+            def __init__(self) -> None:
+                self.url = "http://127.0.0.1:8900"
+                self.events: list[str] = []
+
+            def start(self) -> None:
+                self.events.append("start")
+
+            def stop(self) -> None:
+                self.events.append("stop")
+
+        proxy = _FakeProxy()
+
+        def provider(_distro, _apps):  # type: ignore[type-arg]
+            return proxy
+
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[DistroSpec(name=DistroName.UBUNTU, golden_image=tmp_path / "g.qcow2")],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        backend = FakeBackend()
+        execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            store_proxy_provider=provider,
+            work_root=tmp_path,
+        )
+        assert proxy.events == ["start", "stop"]
+
+    def test_proxy_stop_called_even_when_driver_fails(self, tmp_path: Path) -> None:
+        """driver rzuca wyjątek → proxy.stop() mimo to (finally)."""
+
+        class _FakeProxy:
+            def __init__(self) -> None:
+                self.events: list[str] = []
+
+            def start(self) -> None:
+                self.events.append("start")
+
+            def stop(self) -> None:
+                self.events.append("stop")
+
+            url = "http://x"
+
+        class _FailingDriver:
+            distro = DistroName.UBUNTU
+
+            def commands_for(self, app):  # type: ignore[override]
+                return [["broken-store-command"]]
+
+        proxy = _FakeProxy()
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[DistroSpec(name=DistroName.UBUNTU, golden_image=tmp_path / "g.qcow2")],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        backend = FakeBackend(raise_on={"qemu_agent_exec"})
+        with pytest.raises(RuntimeError):
+            execute(
+                spec,
+                backend=backend,
+                matcher=_default_matcher(),
+                drivers={DistroName.UBUNTU: _FailingDriver()},  # type: ignore[dict-item]
+                store_proxy_provider=lambda _d, _a: proxy,
+                work_root=tmp_path,
+            )
+        assert proxy.events == ["start", "stop"]
+
+    def test_dry_run_does_not_invoke_provider(self, tmp_path: Path) -> None:
+        from domains.matrix.ports import StoreProxyLifecycle
+
+        class _TrackingProvider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self, distro, apps) -> StoreProxyLifecycle | None:  # type: ignore[type-arg]
+                self.calls += 1
+                return None
+
+        provider = _TrackingProvider()
+        spec = _spec([_distro(DistroName.UBUNTU)], ["org.kde.kcalc"])
+        backend = FakeBackend()
+        execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            store_proxy_provider=provider,
+        )
+        assert provider.calls == 0

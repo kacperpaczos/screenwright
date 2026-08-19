@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
     from shared.types import AppId
 
-    from domains.matrix.models import DistroName
+    from domains.matrix.models import DistroName, DistroSpec
 
 
 @runtime_checkable
@@ -38,4 +38,27 @@ class ReporterSink(Protocol):
     def record(self, payload: dict[str, object]) -> None: ...
 
 
-__all__ = ["DistroBuilder", "ReporterSink", "StoreDriver"]
+@runtime_checkable
+class StoreProxyLifecycle(Protocol):
+    """Adapter cyklu życia snap-store-proxy (lub innego) — start/stop per distro."""
+
+    url: str
+
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+
+
+@runtime_checkable
+class StoreProxyProvider(Protocol):
+    """Fabryka StoreProxyLifecycle dla danej dystrybucji."""
+
+    def __call__(self, distro: DistroSpec, apps: list[AppId]) -> StoreProxyLifecycle | None: ...
+
+
+__all__ = [
+    "DistroBuilder",
+    "ReporterSink",
+    "StoreDriver",
+    "StoreProxyLifecycle",
+    "StoreProxyProvider",
+]
