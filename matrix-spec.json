@@ -6,14 +6,19 @@
   "templates_dir": null,
   "distros": [
     {
+      "name": "fedora-ws",
+      "golden_image": "~/.local/share/screenwright/images/golden/fedora-ws.qcow2",
+      "build_artifact": "vm/build/install-fedora.sh"
+    },
+    {
       "name": "fedora-kde",
-      "golden_image": "/var/lib/libvirt/images/golden/fedora-kde.qcow2",
-      "build_artifact": "vm/build/fedora-kde.ks"
+      "golden_image": "~/.local/share/screenwright/images/golden/fedora-kde.qcow2",
+      "build_artifact": "vm/build/install-fedora.sh"
     },
     {
       "name": "ubuntu-24.04",
-      "golden_image": "/var/lib/libvirt/images/golden/ubuntu-24.04.qcow2",
-      "build_artifact": "vm/build/ubuntu-24.04.user-data"
+      "golden_image": "~/.local/share/screenwright/images/golden/ubuntu-24.04.qcow2",
+      "build_artifact": "vm/build/seed-ubuntu.sh"
     }
   ]
 }
