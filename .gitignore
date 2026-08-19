@@ -10,10 +10,13 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.import_linter_cache/
 .coverage
 htmlcov/
 dist/
-build/
+# Tylko katalog builda Pythona w korzeniu — bez ukośnika wzorzec łapał
+# także vm/build/, czyli nasze skrypty budujące obrazy.
+/build/
 *.egg-info/
 .eggs/
 

@@ -49,6 +49,9 @@ exclude = ["tests*", "poc*"]
 line-length = 100
 target-version = "py311"
 src = ["domains", "shared", "cli", "tests"]
+# Submoduły to cudzy kod referencyjny. Bez tego `ruff --fix` z korzenia
+# przestawia w nich importy i brudzi 19 plików w trzech repozytoriach.
+extend-exclude = ["discover", "gnome-software", "mintinstall", "poc"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "TCH", "PT"]

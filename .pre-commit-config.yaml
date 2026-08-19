@@ -1,3 +1,6 @@
+# Submoduły to cudzy kod referencyjny — nie formatujemy go.
+exclude: '^(discover|gnome-software|mintinstall)/'
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.5
