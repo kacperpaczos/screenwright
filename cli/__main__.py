@@ -11,6 +11,7 @@ from cli.collect_cmd import run_collect
 from cli.matrix_cmd import run_matrix_execute, run_matrix_plan
 from cli.override_cmd import run_override
 from cli.serve_cmd import run_serve_start, run_serve_status, run_serve_stop
+from cli.vm_cmd import add_vm_parser
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -53,6 +54,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="backend dla --execute (virsh=wymaga libvirt; fake=symulacja)",
     )
     p_matrix.add_argument("--output", default="vm/reports/matrix-report.json")
+    p_matrix.add_argument(
+        "--store-proxy-port",
+        type=int,
+        default=8900,
+        help="port lokalnego snap-store-proxy (gdy DistroSpec.store_proxy == snap-store)",
+    )
+    p_matrix.add_argument(
+        "--cli-serve-base",
+        default="http://127.0.0.1:8899",
+        help="URL serwera screenshotów (cli serve), na który wskazują media w snap-store-proxy",
+    )
+    p_matrix.add_argument(
+        "--media-dir",
+        default="poc/media",
+        help="katalog serwowany przez `cli serve` — z niego budowane są URL-e mediów",
+    )
 
     p_override = sub.add_parser("override", help="zbuduj override katalogu AppStream")
     p_override.add_argument("--id", required=True)
@@ -78,6 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve_status.add_argument("--port", type=int, default=8899)
     p_serve_status.add_argument("--host", default="127.0.0.1")
 
+    add_vm_parser(sub)
+
     return parser
 
 
@@ -98,6 +117,8 @@ def dispatch(args: argparse.Namespace) -> int:
         if args.serve_action == "stop":
             return run_serve_stop()
         return run_serve_status(args)
+    if args.command == "vm":
+        return args.func(args)
     return 2
 
 
