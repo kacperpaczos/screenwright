@@ -74,6 +74,21 @@ def build_parser() -> argparse.ArgumentParser:
         default="poc/media",
         help="katalog serwowany przez `cli serve` — z niego budowane są URL-e mediów",
     )
+    p_matrix.add_argument(
+        "--warm-root",
+        default=None,
+        help="katalog szablonów warm cache (domyślnie <image_root>/warm dla --backend virsh)",
+    )
+    p_matrix.add_argument(
+        "--no-warm-cache",
+        action="store_true",
+        help="zawsze zimny boot, bez save/restore",
+    )
+    p_matrix.add_argument(
+        "--rebuild-warm-cache",
+        action="store_true",
+        help="skasuj szablony warm dystrybucji ze specu przed przebiegiem",
+    )
 
     p_override = sub.add_parser("override", help="zbuduj override katalogu AppStream")
     p_override.add_argument("--id", required=True)

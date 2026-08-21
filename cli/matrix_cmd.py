@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +34,11 @@ from domains.matrix.runner import (
     plan as matrix_plan,
 )
 from domains.matrix.store_proxy import SnapInfo, SnapMedia, StoreProxyConfig, StoreProxyServer
+from domains.matrix.warm_cache import WarmCache
 from shared.logging import log_entry
 from shared.ports import LibvirtBackend
 from shared.results import MatrixReport, Score
+from shared.settings import load_settings
 from shared.types import AppId
 
 
@@ -111,6 +114,33 @@ def _make_shell_factory(backend: LibvirtBackend) -> GuestShellFactory:
     return ssh_shell_for
 
 
+def _resolve_warm_root(args: argparse.Namespace, backend: LibvirtBackend) -> Path | None:
+    """Warm cache: jawnie z ``--warm-root``, domyślnie tylko dla virsh; ``--no-warm-cache`` wyłącza.
+
+    Fake bez jawnego katalogu nie dotyka ``~/.local/share`` — testy i suche
+    przebiegi nie mają zostawiać po sobie szablonów.
+    """
+    if getattr(args, "no_warm_cache", False):
+        return None
+    explicit = getattr(args, "warm_root", None)
+    if explicit:
+        return Path(explicit).expanduser()
+    if isinstance(backend, VirshBackend):
+        return load_settings().image_root / "warm"
+    return None
+
+
+def _hypervisor_key() -> str:
+    """Wersja QEMU hosta — pliki stanu nie przeżywają upgrade'u, więc są nim kluczowane."""
+    try:
+        result = subprocess.run(
+            ["qemu-system-x86_64", "--version"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.splitlines()[0].strip() if result.stdout else ""
+
+
 def _make_matcher(threshold: float) -> TemplateMatcherPort:
     """Wybiera matcher: OpenCV jeśli dostępny, inaczej Identity."""
     try:
@@ -155,6 +185,7 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
             return 2
         backend: LibvirtBackend = _make_backend(args)
         shell_factory = _make_shell_factory(backend)
+        warm_root = _resolve_warm_root(args, backend)
         matcher: TemplateMatcherPort = _make_matcher(spec.verify_threshold)
         drivers = _drivers_for_spec(spec)
         provider = _make_store_proxy_provider(args)
@@ -171,6 +202,17 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
             note="żadna dystrybucja w specu nie ma drivera — krok qemu-agent-exec pominięty",
         )
 
+    cache_key = _hypervisor_key() if warm_root is not None else ""
+    if warm_root is not None and getattr(args, "rebuild_warm_cache", False):
+        for distro in spec.distros:
+            WarmCache(warm_root).invalidate(distro.name)
+    log_entry(
+        20,
+        "cli.matrix.warm_cache",
+        root=str(warm_root) if warm_root else None,
+        cache_key=cache_key or None,
+    )
+
     report = matrix_execute(
         spec,
         backend=backend,
@@ -178,6 +220,8 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
         drivers=drivers,
         store_proxy_provider=provider,
         shell_factory=shell_factory,
+        warm_root=warm_root,
+        cache_key=cache_key,
     )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

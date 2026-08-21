@@ -9,6 +9,7 @@ from domains.matrix.drivers import DiscoverDriver
 from domains.matrix.guest import SESSION_PROBE, GuestWaits
 from domains.matrix.models import DistroName, DistroSpec, DomainConfig, MatrixRunSpec
 from domains.matrix.runner import _default_matcher, _teardown, _timed, execute, plan
+from domains.matrix.warm_cache import WarmCache
 from pydantic import ValidationError
 from shared.results import PhaseTiming
 
@@ -696,6 +697,135 @@ class TestTimings:
             detail["commands"] = 2
         assert timings[0].app == "org.kde.kcalc"
         assert timings[0].detail == {"commands": 2, "ok": True}
+
+
+class TestWarmCache:
+    """Warm cache w runnerze: build przy chybieniu, restore przy trafieniu, głośny fallback."""
+
+    def _spec(self, tmp_path: Path, apps: list[str] | None = None) -> MatrixRunSpec:
+        golden = tmp_path / "golden.qcow2"
+        if not golden.exists():
+            golden.write_bytes(b"golden")
+        return MatrixRunSpec(
+            apps=apps or ["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[DistroSpec(name=DistroName.FEDORA_KDE, golden_image=golden)],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+
+    def _run(self, tmp_path: Path, backend: FakeBackend, *, warm: bool = True) -> object:
+        screen = backend.screen
+        return execute(
+            self._spec(tmp_path),
+            backend=backend,
+            matcher=_default_matcher(),
+            drivers={DistroName.FEDORA_KDE: DiscoverDriver()},
+            work_root=tmp_path / "work",
+            shell_factory=fake_shell_factory(screen=screen),
+            warm_root=(tmp_path / "warm") if warm else None,
+            cache_key="qemu-test",
+        )
+
+    def test_first_run_builds_template_and_restores_from_it(self, tmp_path: Path) -> None:
+        backend = FakeBackend()
+        report = self._run(tmp_path, backend)
+        methods = [c.method for c in backend.calls]
+        assert methods.index("create") < methods.index("save") < methods.index("restore")
+        assert methods.index("restore") < len(methods) - 1 - methods[::-1].index("destroy")
+        overlays = [c.args for c in backend.calls if c.method == "create_overlay"]
+        assert overlays[0][0] == tmp_path / "golden.qcow2"  # build: overlay na golden
+        assert overlays[1][0] == tmp_path / "warm" / "fedora-kde" / "base.qcow2"  # po save: na base
+        assert all(args[1] == tmp_path / "warm" / "fedora-kde" / "disk.qcow2" for args in overlays)
+        assert methods.index("save") > methods.index("screenshot"), (
+            "przed save ekran ma się uspokoić"
+        )
+        warm_dir = tmp_path / "warm" / "fedora-kde"
+        assert (warm_dir / "base.qcow2").exists()
+        assert (warm_dir / "state.save").exists()
+        assert (warm_dir / "domain.xml").exists()
+        assert (warm_dir / "manifest.json").exists()
+        assert (warm_dir / "ready.png").exists()
+        assert not (warm_dir / "disk.qcow2").exists(), "overlay przebiegu znika w teardownie"
+        (name,) = {c.args[1] for c in backend.calls if c.method == "create"}
+        assert name == "sw-fedora-kde-warm"
+        phases = [t.phase for t in report.timings]  # type: ignore[attr-defined]
+        assert "warm_save" in phases
+        assert "warm_restore" in phases
+        assert phases.index("warm_save") < phases.index("warm_restore")
+        create = next(t for t in report.timings if t.phase == "create")  # type: ignore[attr-defined]
+        assert create.detail["warm"] == "build"
+
+    def test_second_run_hits_template_and_skips_boot(self, tmp_path: Path) -> None:
+        self._run(tmp_path, FakeBackend())
+        backend = FakeBackend()  # nowy proces: stan tylko na dysku
+        report = self._run(tmp_path, backend)
+        methods = [c.method for c in backend.calls]
+        assert "create" not in methods
+        assert "save" not in methods
+        assert [m for m in methods if m != "destroy"][:2] == ["create_overlay", "restore"]
+        restore = next(c for c in backend.calls if c.method == "restore")
+        assert restore.args[0] == tmp_path / "warm" / "fedora-kde" / "state.save"
+        assert restore.args[1] == tmp_path / "warm" / "fedora-kde" / "domain.xml"
+        overlay = next(c for c in backend.calls if c.method == "create_overlay")
+        assert overlay.args[0] == tmp_path / "warm" / "fedora-kde" / "base.qcow2"
+        phases = [t.phase for t in report.timings]  # type: ignore[attr-defined]
+        assert "warm_restore" in phases
+        assert "warm_save" not in phases
+        assert "create" not in phases
+        assert len(report.results) == 1  # type: ignore[attr-defined]
+
+    def test_golden_rebuild_invalidates_template(self, tmp_path: Path) -> None:
+        self._run(tmp_path, FakeBackend())
+        golden = tmp_path / "golden.qcow2"
+        golden.write_bytes(b"golden v2")
+        backend = FakeBackend()
+        self._run(tmp_path, backend)
+        methods = [c.method for c in backend.calls]
+        assert "create" in methods
+        assert "save" in methods
+
+    def test_restore_failure_falls_back_to_cold_build(self, tmp_path: Path) -> None:
+        self._run(tmp_path, FakeBackend())
+        backend = FakeBackend(raise_on={"restore"})
+        report = self._run(tmp_path, backend)
+        methods = [c.method for c in backend.calls]
+        # hit → restore pada → szablon skasowany → build: create + save → restore pada znowu → zimny klon.
+        # FakeBackend.raise_on rzuca przed zapisaniem wywołania, więc nieudanych restore nie ma w calls.
+        assert "restore" not in methods
+        assert methods.count("create") == 2
+        assert methods.count("save") == 1
+        assert methods.count("destroy") >= 3
+        names = [c.args[1] for c in backend.calls if c.method == "create"]
+        assert names[0] == "sw-fedora-kde-warm"
+        assert names[1].startswith("sw-fedora-kde-")
+        assert names[1] != "sw-fedora-kde-warm"
+        assert len(report.results) == 1  # type: ignore[attr-defined]
+        assert not list((tmp_path / "work").glob("*.qcow2"))
+
+    def test_save_failure_continues_on_the_cold_clone(self, tmp_path: Path) -> None:
+        backend = FakeBackend(raise_on={"save"})
+        report = self._run(tmp_path, backend)
+        methods = [c.method for c in backend.calls]
+        assert "restore" not in methods
+        assert len(report.results) == 1  # type: ignore[attr-defined]
+        assert not (tmp_path / "warm" / "fedora-kde" / "manifest.json").exists()
+
+    def test_busy_lock_falls_back_to_plain_cold_clone(self, tmp_path: Path) -> None:
+        backend = FakeBackend()
+        with WarmCache(tmp_path / "warm").lock(DistroName.FEDORA_KDE):
+            self._run(tmp_path, backend)
+        methods = [c.method for c in backend.calls]
+        assert "save" not in methods
+        (name,) = {c.args[1] for c in backend.calls if c.method == "create"}
+        assert name != "sw-fedora-kde-warm"
+
+    def test_warm_disabled_keeps_unique_names(self, tmp_path: Path) -> None:
+        backend = FakeBackend()
+        self._run(tmp_path, backend, warm=False)
+        methods = [c.method for c in backend.calls]
+        assert "save" not in methods
+        assert "restore" not in methods
+        assert not (tmp_path / "warm").exists()
 
 
 class TestStoreProxyIntegration:

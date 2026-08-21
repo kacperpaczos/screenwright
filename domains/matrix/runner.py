@@ -5,10 +5,11 @@ from __future__ import annotations
 import shutil
 import socket
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from shared.logging import log_entry
 from shared.results import MatrixReport, PhaseTiming, Score, VerificationResult
@@ -37,6 +38,14 @@ from domains.matrix.models import (
     DomainConfig,
     MatrixRunSpec,
     MatrixStep,
+)
+from domains.matrix.warm_cache import (
+    DISK_NAME,
+    STATE_NAME,
+    WarmCache,
+    WarmTemplate,
+    hardware_of,
+    template_name,
 )
 
 if TYPE_CHECKING:
@@ -131,6 +140,8 @@ def execute(
     store_proxy_provider: StoreProxyProvider | None = None,
     waits: GuestWaits | None = None,
     shell_factory: GuestShellFactory | None = None,
+    warm_root: Path | None = None,
+    cache_key: str = "",
 ) -> MatrixReport:
     """Wykonuje przebieg matrycy. W trybie dry_run NIE wywołuje backendu.
 
@@ -150,6 +161,12 @@ def execute(
     gdy ekran zmienił się względem klatki sprzed uruchomienia i przestał się
     zmieniać. ``waits`` steruje limitami (``None`` = ``GuestWaits.default()``);
     ``shell_factory`` buduje shell per klon (``None`` = SSH przez port passt).
+
+    ``warm_root`` włącza warm cache (``domains.matrix.warm_cache``): trafienie
+    w szablon to ``restore`` zamiast bootu; chybienie — zimny boot do gotowości,
+    ``save`` i od razu ``restore`` z nowego szablonu; nieudany ``restore`` —
+    głośny fallback na zimny boot. ``cache_key`` (np. wersja QEMU) unieważnia
+    szablony po upgrade'ach hosta.
     """
     if backend is None:
         backend = FakeBackend()
@@ -166,85 +183,89 @@ def execute(
 
     if not spec.dry_run:
         work_root.mkdir(parents=True, exist_ok=True)
+    warm_cache = WarmCache(warm_root, cache_key=cache_key) if warm_root is not None else None
 
     for distro in spec.distros:
-        name = make_unique_name(f"sw-{distro.name.value.replace('.', '-')}")
-        domain = _domain_for(distro, name=name, ssh_port=pick_ssh_port())
-        disk_path = _disk_path(work_root if not spec.dry_run else Path("/tmp/dry"), distro.name)
-        xml = render_domain_xml(domain, disk_path, cdrom_path=distro.seed_iso)
-
         distro_label = distro.name.value
-        proxy: StoreProxyLifecycle | None = None
-        if not spec.dry_run and store_proxy_provider is not None:
-            proxy = store_proxy_provider(distro, spec.apps)
-            if proxy is not None:
-                with _timed(timings, distro_label, None, "proxy_start"):
-                    _start_store_proxy(proxy, distro.name)
+        _hardware_for(distro)  # waliduje domain_overrides także w dry_run — błąd ma wyjść od razu
+        with ExitStack() as stack:
+            proxy: StoreProxyLifecycle | None = None
+            if not spec.dry_run and store_proxy_provider is not None:
+                proxy = store_proxy_provider(distro, spec.apps)
+                if proxy is not None:
+                    with _timed(timings, distro_label, None, "proxy_start"):
+                        _start_store_proxy(proxy, distro.name)
 
-        if not spec.dry_run:
-            with _timed(timings, distro_label, None, "create_overlay"):
-                backend.create_overlay(distro.golden_image, disk_path)
-            with _timed(timings, distro_label, None, "create"):
-                backend.create(xml, name)
+            warm_here: WarmCache | None = None
+            if warm_cache is not None and not spec.dry_run:
+                if stack.enter_context(warm_cache.lock(distro.name)):
+                    warm_here = warm_cache
+                else:
+                    log_entry(30, "matrix.warm.busy", distro=distro_label)
 
-        driver = (drivers or {}).get(distro.name)
-        shell: GuestShell | None = None
-        try:
+            clone: _Clone | None = None
             if not spec.dry_run:
-                shell = shell_factory(domain, distro)
-                with _timed(timings, distro_label, None, "wait_agent"):
-                    wait_for_agent(backend, name, waits=waits)
-                with _timed(timings, distro_label, None, "wait_shell"):
-                    wait_for_shell(shell, waits=waits)
-                with _timed(timings, distro_label, None, "wait_session"):
-                    wait_for_session(shell, waits=waits)
-            for app in spec.apps:
-                actual = (
-                    work_root / f"{name}-{app}.png" if not spec.dry_run else Path("/tmp/dry.png")
+                clone = _bring_up(
+                    backend,
+                    shell_factory,
+                    distro,
+                    work_root=work_root,
+                    warm_cache=warm_here,
+                    waits=waits,
+                    timings=timings,
                 )
-                if not spec.dry_run:
-                    baseline: Frame | None = None
-                    if driver is not None and shell is not None:
-                        with _timed(timings, distro_label, app, "launch") as detail:
-                            commands = driver.commands_for(app)
-                            detail["commands"] = len(commands)
-                            if commands:
-                                baseline = capture_frame(backend, name, actual)
-                                launch(shell, commands, waits=waits)
-                    with _timed(timings, distro_label, app, "settle") as detail:
-                        settled = settle_screenshot(
-                            backend, name, actual, waits=waits, baseline=baseline
-                        )
-                        detail["frames"] = settled.frames
-                        detail["settled"] = settled.settled
-                        detail["changed"] = settled.changed
-                        detail["distance"] = round(settled.distance, 4)
-                template = _resolve_template(spec.templates_dir, distro.name, app)
-                with _timed(timings, distro_label, app, "verify"):
-                    score = matcher.match(template, actual)
-                passed = score.value >= matcher.threshold.value
-                result = VerificationResult(
-                    passed=passed,
-                    score=score,
-                    threshold=matcher.threshold,
-                    location=(0, 0),
-                    expected_template=template,
-                    actual_screenshot=actual,
-                    notes=(
-                        "dry_run: template same as actual; identity-matcher returns 1.0"
-                        if spec.dry_run
-                        else None
-                    ),
-                )
-                results.append(result)
-                if reporter is not None:
-                    reporter.record(result.model_dump(mode="json"))
-        finally:
-            if not spec.dry_run:
-                with _timed(timings, distro_label, None, "teardown"):
-                    _teardown(backend, name, disk_path)
-            if proxy is not None:
-                proxy.stop()
+
+            driver = (drivers or {}).get(distro.name)
+            try:
+                for app in spec.apps:
+                    actual = (
+                        work_root / f"{clone.name}-{app}.png"
+                        if clone is not None
+                        else Path("/tmp/dry.png")
+                    )
+                    if clone is not None:
+                        baseline: Frame | None = None
+                        if driver is not None:
+                            with _timed(timings, distro_label, app, "launch") as detail:
+                                commands = driver.commands_for(app)
+                                detail["commands"] = len(commands)
+                                if commands:
+                                    baseline = capture_frame(backend, clone.name, actual)
+                                    launch(clone.shell, commands, waits=waits)
+                        with _timed(timings, distro_label, app, "settle") as detail:
+                            settled = settle_screenshot(
+                                backend, clone.name, actual, waits=waits, baseline=baseline
+                            )
+                            detail["frames"] = settled.frames
+                            detail["settled"] = settled.settled
+                            detail["changed"] = settled.changed
+                            detail["distance"] = round(settled.distance, 4)
+                    template = _resolve_template(spec.templates_dir, distro.name, app)
+                    with _timed(timings, distro_label, app, "verify"):
+                        score = matcher.match(template, actual)
+                    passed = score.value >= matcher.threshold.value
+                    result = VerificationResult(
+                        passed=passed,
+                        score=score,
+                        threshold=matcher.threshold,
+                        location=(0, 0),
+                        expected_template=template,
+                        actual_screenshot=actual,
+                        notes=(
+                            "dry_run: template same as actual; identity-matcher returns 1.0"
+                            if spec.dry_run
+                            else None
+                        ),
+                    )
+                    results.append(result)
+                    if reporter is not None:
+                        reporter.record(result.model_dump(mode="json"))
+            finally:
+                if clone is not None:
+                    with _timed(timings, distro_label, None, "teardown"):
+                        _teardown(backend, clone.name, clone.disk_path)
+                if proxy is not None:
+                    proxy.stop()
 
     return MatrixReport(
         run_id=run_id,
@@ -288,6 +309,220 @@ def _timed(
                 detail={**detail, "ok": ok},
             )
         )
+
+
+@dataclass(frozen=True)
+class _Clone:
+    """Działający, gotowy klon: nazwa domeny, jego overlay i shell do sesji."""
+
+    name: str
+    disk_path: Path
+    shell: GuestShell
+
+
+def _hardware_for(distro: DistroSpec) -> dict[str, Any]:
+    """Sprzęt klona z ``DEFAULT_DOMAIN`` + ``domain_overrides`` — klucz zgodności szablonu warm."""
+    return hardware_of(_domain_for(distro, name="sw-hardware-probe", ssh_port=2222))
+
+
+def _wait_ready(
+    backend: LibvirtBackend,
+    shell: GuestShell,
+    name: str,
+    *,
+    waits: GuestWaits,
+    timings: list[PhaseTiming],
+    label: str,
+) -> None:
+    with _timed(timings, label, None, "wait_agent"):
+        wait_for_agent(backend, name, waits=waits)
+    with _timed(timings, label, None, "wait_shell"):
+        wait_for_shell(shell, waits=waits)
+    with _timed(timings, label, None, "wait_session"):
+        wait_for_session(shell, waits=waits)
+
+
+def _cold_clone(
+    backend: LibvirtBackend,
+    shell_factory: GuestShellFactory,
+    distro: DistroSpec,
+    domain: DomainConfig,
+    xml: str,
+    disk_path: Path,
+    *,
+    waits: GuestWaits,
+    timings: list[PhaseTiming],
+    warm: str,
+) -> _Clone:
+    """Overlay na golden → ``virsh create`` → gotowość. Gdy gotowość padnie, sprząta i rzuca dalej."""
+    label = distro.name.value
+    with _timed(timings, label, None, "create_overlay"):
+        backend.create_overlay(distro.golden_image, disk_path)
+    with _timed(timings, label, None, "create") as detail:
+        detail["warm"] = warm
+        backend.create(xml, domain.name)
+    shell = shell_factory(domain, distro)
+    try:
+        _wait_ready(backend, shell, domain.name, waits=waits, timings=timings, label=label)
+    except BaseException:
+        _teardown(backend, domain.name, disk_path)
+        raise
+    return _Clone(name=domain.name, disk_path=disk_path, shell=shell)
+
+
+def _plain_cold(
+    backend: LibvirtBackend,
+    shell_factory: GuestShellFactory,
+    distro: DistroSpec,
+    *,
+    work_root: Path,
+    waits: GuestWaits,
+    timings: list[PhaseTiming],
+) -> _Clone:
+    """Klon jak przed warm cache: unikalna nazwa, wolny port, overlay w ``work_root``."""
+    name = make_unique_name(f"sw-{distro.name.value.replace('.', '-')}")
+    domain = _domain_for(distro, name=name, ssh_port=pick_ssh_port())
+    disk_path = _disk_path(work_root, distro.name)
+    xml = render_domain_xml(domain, disk_path, cdrom_path=distro.seed_iso)
+    return _cold_clone(
+        backend,
+        shell_factory,
+        distro,
+        domain,
+        xml,
+        disk_path,
+        waits=waits,
+        timings=timings,
+        warm="off",
+    )
+
+
+def _restore_template(
+    backend: LibvirtBackend,
+    shell_factory: GuestShellFactory,
+    distro: DistroSpec,
+    template: WarmTemplate,
+    warm_cache: WarmCache,
+    *,
+    waits: GuestWaits,
+    timings: list[PhaseTiming],
+) -> _Clone | None:
+    """Świeży overlay na ``base`` + ``restore --xml`` + gotowość; ``None`` = szablon do wyrzucenia."""
+    label = distro.name.value
+    name = template.manifest.name
+    domain = _domain_for(distro, name=name, ssh_port=template.manifest.ssh_port)
+    try:
+        with suppress(
+            Exception
+        ):  # niedobitek po przerwanym przebiegu; brak domeny to stan oczekiwany
+            backend.destroy(name)
+        with _timed(timings, label, None, "create_overlay"):
+            backend.create_overlay(template.base, template.disk)
+        with _timed(timings, label, None, "warm_restore") as detail:
+            detail["warm"] = "hit"
+            backend.restore(template.state, xml=template.xml)
+        shell = shell_factory(domain, distro)
+        _wait_ready(backend, shell, name, waits=waits, timings=timings, label=label)
+    except Exception as exc:
+        log_entry(30, "matrix.warm.restore_failed", distro=label, error=str(exc))
+        _teardown(backend, name, template.disk)
+        warm_cache.invalidate(distro.name)
+        return None
+    return _Clone(name=name, disk_path=template.disk, shell=shell)
+
+
+def _build_template(
+    backend: LibvirtBackend,
+    shell_factory: GuestShellFactory,
+    distro: DistroSpec,
+    warm_cache: WarmCache,
+    *,
+    work_root: Path,
+    waits: GuestWaits,
+    timings: list[PhaseTiming],
+) -> _Clone:
+    """Zimny boot na dysku szablonu → ``save`` → zamrożenie → ``restore`` ze świeżego overlaya.
+
+    ``save`` gasi domenę, więc przebieg i tak musi przejść przez ``restore`` —
+    dzięki temu pierwszy przebieg sprawdza tę samą ścieżkę, co każdy następny.
+    Gdy ``save`` nie wyjdzie, jedziemy dalej na działającym zimnym klonie bez
+    szablonu; gdy ``restore`` zaraz po ``save`` padnie, bootujemy jeszcze raz po
+    staremu — w obu wypadkach głośno w logu, nigdy cicho.
+    """
+    label = distro.name.value
+    name = template_name(distro.name)
+    domain = _domain_for(distro, name=name, ssh_port=pick_ssh_port())
+    directory = warm_cache.directory(distro.name)
+    disk_path = directory / DISK_NAME
+    xml = render_domain_xml(domain, disk_path, cdrom_path=distro.seed_iso)
+    with suppress(Exception):  # niedobitek po przerwanym przebiegu
+        backend.destroy(name)
+    warm_cache.prepare(distro.name, xml)
+    clone = _cold_clone(
+        backend,
+        shell_factory,
+        distro,
+        domain,
+        xml,
+        disk_path,
+        waits=waits,
+        timings=timings,
+        warm="build",
+    )
+    try:
+        with _timed(timings, label, None, "warm_save") as detail:
+            quiet = settle_screenshot(backend, name, directory / "ready.png", waits=waits)
+            detail["settled"] = quiet.settled
+            backend.save(name, directory / STATE_NAME)
+    except Exception as exc:
+        log_entry(30, "matrix.warm.save_failed", distro=label, error=str(exc))
+        (directory / STATE_NAME).unlink(missing_ok=True)
+        return clone
+    template = warm_cache.commit(
+        distro, name=name, ssh_port=domain.ssh_port, hardware=hardware_of(domain)
+    )
+    restored = _restore_template(
+        backend, shell_factory, distro, template, warm_cache, waits=waits, timings=timings
+    )
+    if restored is not None:
+        return restored
+    log_entry(30, "matrix.warm.build_unusable", distro=label)
+    return _plain_cold(
+        backend, shell_factory, distro, work_root=work_root, waits=waits, timings=timings
+    )
+
+
+def _bring_up(
+    backend: LibvirtBackend,
+    shell_factory: GuestShellFactory,
+    distro: DistroSpec,
+    *,
+    work_root: Path,
+    warm_cache: WarmCache | None,
+    waits: GuestWaits,
+    timings: list[PhaseTiming],
+) -> _Clone:
+    """Gotowy klon: z szablonu warm (hit), po zbudowaniu szablonu (miss) albo po staremu (bez warm)."""
+    if warm_cache is not None:
+        template = warm_cache.lookup(distro, _hardware_for(distro))
+        if template is not None:
+            clone = _restore_template(
+                backend, shell_factory, distro, template, warm_cache, waits=waits, timings=timings
+            )
+            if clone is not None:
+                return clone
+        return _build_template(
+            backend,
+            shell_factory,
+            distro,
+            warm_cache,
+            work_root=work_root,
+            waits=waits,
+            timings=timings,
+        )
+    return _plain_cold(
+        backend, shell_factory, distro, work_root=work_root, waits=waits, timings=timings
+    )
 
 
 STORE_PROXY_READY_TIMEOUT = 20.0

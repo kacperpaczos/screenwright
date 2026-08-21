@@ -9,9 +9,11 @@ from pathlib import Path
 import pytest
 from cli.matrix_cmd import (
     _drivers_for_spec,
+    _hypervisor_key,
     _load_spec,
     _make_backend,
     _make_shell_factory,
+    _resolve_warm_root,
     run_matrix_execute,
     run_matrix_plan,
 )
@@ -170,3 +172,57 @@ class TestExitCodes:
 
 
 __all__: list[str] = []
+
+
+class TestWarmCacheFlags:
+    def test_fake_backend_has_no_warm_cache_by_default(self) -> None:
+        assert _resolve_warm_root(argparse.Namespace(), FakeBackend()) is None
+
+    def test_virsh_backend_defaults_to_image_root_warm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SCREENWRIGHT_IMAGE_ROOT", "/imgs")
+        assert _resolve_warm_root(argparse.Namespace(), VirshBackend()) == Path("/imgs/warm")
+
+    def test_explicit_root_wins_and_no_warm_cache_disables(self) -> None:
+        ns = argparse.Namespace(warm_root="~/w", no_warm_cache=False)
+        assert _resolve_warm_root(ns, FakeBackend()) == Path("~/w").expanduser()
+        ns = argparse.Namespace(warm_root="~/w", no_warm_cache=True)
+        assert _resolve_warm_root(ns, VirshBackend()) is None
+
+    def test_hypervisor_key_is_first_line_or_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import subprocess
+
+        monkeypatch.setattr(
+            "cli.matrix_cmd.subprocess.run",
+            lambda *a, **k: subprocess.CompletedProcess(
+                a, 0, "QEMU emulator version 10.2.2\nCopyright\n", ""
+            ),
+        )
+        assert _hypervisor_key() == "QEMU emulator version 10.2.2"
+        monkeypatch.setattr(
+            "cli.matrix_cmd.subprocess.run",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("no qemu")),
+        )
+        assert _hypervisor_key() == ""
+
+    def test_execute_with_fake_backend_and_warm_root_builds_template(self, tmp_path: Path) -> None:
+        golden = tmp_path / "g.qcow2"
+        golden.write_bytes(b"g")
+        spec_path = _write_spec(
+            tmp_path,
+            {
+                "apps": ["org.kde.kcalc"],
+                "distros": [{"name": "fedora-kde", "golden_image": str(golden)}],
+                "dry_run": False,
+            },
+        )
+        out = tmp_path / "report.json"
+        rc = run_matrix_execute(
+            _args(spec_path, execute=True, output=str(out), warm_root=str(tmp_path / "warm"))
+        )
+        assert rc == 0
+        assert (tmp_path / "warm" / "fedora-kde" / "manifest.json").exists()
+        phases = [t["phase"] for t in json.loads(out.read_text())["timings"]]
+        assert "warm_save" in phases
+        assert "warm_restore" in phases

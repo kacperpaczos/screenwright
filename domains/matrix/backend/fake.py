@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING, Any
 from shared.types import Sha256
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
+
+    from domains.matrix.ports import GuestShellFactory
 
 
 @dataclass
@@ -162,14 +163,19 @@ class FakeBackend:
             self._domains[name].saved = True
 
     def restore(self, state_file: Path, xml: Path | None = None) -> None:
+        """Jak `virsh restore`: stan zapisany przez ten fake albo — jak na dysku z
+        poprzedniego przebiegu — plik, który istnieje, z nazwą domeny z `xml`."""
         self._record("restore", state_file, xml)
-        if state_file not in self._states:
+        name = self._states.get(state_file)
+        xml_text = xml.read_text() if xml is not None and xml.exists() else ""
+        if name is None and state_file.exists() and xml_text:
+            name = _name_from_xml(xml_text)
+        if name is None:
             raise RuntimeError(f"no fake save file at {state_file}")
-        name = self._states[state_file]
-        state = self._domains.setdefault(name, DomainState(name=name, xml=""))
+        state = self._domains.setdefault(name, DomainState(name=name, xml=xml_text))
         state.started = True
-        if xml is not None:
-            state.xml = xml.read_text() if xml.exists() else state.xml
+        if xml_text:
+            state.xml = xml_text
 
     def restored_name(self, state_file: Path) -> str:
         """Nazwa domeny, którą przywróciłby `restore(state_file)` — dla asercji w testach."""
@@ -244,7 +250,7 @@ class FakeShell:
 
 def fake_shell_factory(
     shell: FakeShell | None = None, *, screen: FakeScreen | None = None
-) -> Callable[[Any, Any], FakeShell]:
+) -> GuestShellFactory:
     """Fabryka `GuestShell` dla testów: zawsze ten sam `FakeShell` (albo świeży na `screen`)."""
     instance = shell if shell is not None else FakeShell(screen=screen)
 
@@ -252,6 +258,14 @@ def fake_shell_factory(
         return instance
 
     return factory
+
+
+def _name_from_xml(xml: str) -> str | None:
+    start = xml.find("<name>")
+    end = xml.find("</name>")
+    if start < 0 or end < 0:
+        return None
+    return xml[start + len("<name>") : end].strip() or None
 
 
 def compute_screenshot_hash(payload: bytes) -> Sha256:

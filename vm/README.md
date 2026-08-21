@@ -186,17 +186,32 @@ Co robi runner per dystrybucja (`domains/matrix/runner.py` +
 Każda faza ląduje w raporcie jako `timings[]` (`PhaseTiming`), a CLI wypisuje
 sumy per faza (`cli.matrix.timing_summary`).
 
-## Save / restore (ciepły start)
+## Warm cache (save / restore zamiast bootu)
 
-`VirshBackend` ma `save()` / `restore()` (`virsh save` działa dla domen
-transient, w przeciwieństwie do `managedsave`), ale runner jeszcze ich nie
-używa — każdy przebieg bootuje na zimno. Dwie rzeczy warto ustawić zawczasu:
+Domyślnie włączony dla `--backend virsh` (`domains/matrix/warm_cache.py`).
+Szablon per dystrybucja leży w `~/.local/share/screenwright/images/warm/<distro>/`:
+`base.qcow2` (overlay po boocie, zamrożony), `state.save` (RAM z `virsh save`),
+`domain.xml` (dokładny XML klona), `manifest.json`, `ready.png` (ekran w chwili
+`save`). Każdy przebieg tworzy świeży `disk.qcow2` z backing `base.qcow2` pod tą
+samą ścieżką i robi `virsh restore --xml domain.xml state.save`; domena nazywa
+się `sw-<distro>-warm`, bo restore wymaga tej samej nazwy co save.
 
-- Plik stanu ma rozmiar RAM-u gościa. W trybie sesji demon czyta
-  `~/.config/libvirt/qemu.conf` (bez sudo); `save_image_format = "zstd"`
-  daje ~2× mniejsze pliki.
-- Po `dnf upgrade` QEMU na hoście zapisany stan jest nieaktualny — trzeba go
-  wyrzucić i pozwolić na zimny boot.
+- **chybienie** (brak szablonu, zmieniony golden / sprzęt klona / wersja QEMU,
+  zajęty port SSH): zimny boot do gotowości → `save` → zamrożenie → `restore`,
+  czyli pierwszy przebieg przechodzi tę samą ścieżką, co każdy następny;
+- **nieudany restore**: ostrzeżenie w logu (`matrix.warm.restore_failed`),
+  szablon skasowany, zimny boot — nigdy cicho;
+- drugi przebieg tej samej dystrybucji w tym samym czasie dostaje
+  `matrix.warm.busy` i bootuje po staremu (flock na katalogu szablonu).
+
+Flagi: `--no-warm-cache` (zawsze zimno), `--warm-root DIR`,
+`--rebuild-warm-cache` (skasuj szablony dystrybucji ze specu). `--backend fake`
+nie używa warm cache, chyba że podasz `--warm-root`.
+
+Plik stanu ma rozmiar RAM-u gościa; w trybie sesji demon czyta
+`~/.config/libvirt/qemu.conf` (bez sudo) — `save_image_format = "zstd"` daje
+~1 GB przy 4 GiB gościa. Po `dnf upgrade` QEMU szablony są unieważniane
+automatycznie (manifest trzyma wersję hypervisora). Liczby: `../docs/matrix-timing.md`.
 
 ## Zdalny podgląd (human in the loop)
 
