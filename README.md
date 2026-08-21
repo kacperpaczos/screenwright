@@ -21,11 +21,15 @@ Implemented:
 - `cli/` — unified CLI: `python -m cli {capture,override,collect,matrix,serve}`
 - `shared/` — types, ports, http_client, hashing, results
 
+Live status (2026-08-22): the matrix runs end to end on real libvirt clones
+(`--execute --backend virsh`) — guest readiness over the agent and SSH, store
+commands in the user's graphical session, change-aware screenshots, per-phase
+timings and a `virsh save`/`restore` warm cache; see `docs/matrix-timing.md`.
+
 Not implemented:
 
-- Real VM execution (`virsh` / `libvirtd`) — `VirshBackend` exists but is
-  invoked only with the FakeBackend in tests.
-- e2e tests against actual VMs.
+- e2e tests against actual VMs in CI (live runs are manual, rootless, on the
+  developer's machine).
 - Public website (TODO §8) and GUI (TODO §4).
 
 ## Architecture

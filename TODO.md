@@ -123,8 +123,32 @@ covered by tests — worth knowing before touching this again:
 
 ### Still to do here
 
-- [ ] Run the full matrix end to end and confirm the report references real
-      framebuffer PNGs, not 70-byte `FakeBackend` placeholders.
+- [x] Run the full matrix end to end and confirm the report references real
+      framebuffer PNGs, not 70-byte `FakeBackend` placeholders — done
+      2026-08-22 on Fedora WS (`docs/matrix-timing.md`): 548 KB framebuffer
+      PNGs, per-phase timings in the report, warm cache in place.
+- [ ] **GNOME Software driver without `--quit`.** The baseline shows the store
+      cold-starting (~30–45 s to a window) for *every* app because the driver
+      quits it first; `--details` on the running instance only switches the
+      page. Biggest remaining lever on run time.
+- [ ] **Warm template with the store already running** (save after the first
+      store render), so each app is a page switch, not a cold start.
+- [ ] Golden-image chrome seen on 2026-08-22: GNOME Software's "Enable Third
+      Party Software Repositories?" modal covers the details page
+      (`org.gnome.software show-nonfree-prompt=false` in the builder), and
+      GNOME stays in the Activities overview after autologin, so the store
+      window shows as a workspace thumbnail — leave the overview before the
+      screenshot (driver or image setting).
+- [ ] `qemu-guest-agent` is SELinux-confined (`virt_qemu_ga_t`) on Fedora:
+      session commands go over SSH now. If SSH is ever unavailable, the
+      alternative is an SELinux boolean/policy for the agent in the golden
+      image — not explored.
+- [ ] `work_root` defaults to `/tmp/screenwright-matrix` (tmpfs): screenshots
+      and per-run overlays land in RAM; move it under `image_root`.
+- [ ] Host memory: systemd-oomd killed the whole terminal scope on 2026-08-22
+      when an image build (virt-sparsify) overlapped with matrix clones. Run
+      builds and matrix passes in their own `systemd-run --user --scope`, never
+      concurrently with each other.
 - [ ] Suppress Discover's "Update Issue" modal (it pops over the store page).
 - [ ] Rebuild `fedora-kde.qcow2` cleanly — the current one is 9.1 G because a
       killed `virt-sparsify` had already zero-filled part of the free space.

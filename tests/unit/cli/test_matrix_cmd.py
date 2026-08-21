@@ -21,7 +21,7 @@ from domains.matrix.backend.fake import FakeBackend, FakeShell
 from domains.matrix.backend.ssh import ssh_shell_for
 from domains.matrix.backend.virsh import VirshBackend
 from domains.matrix.drivers.ubuntu import UbuntuDriver
-from domains.matrix.models import DistroName
+from domains.matrix.models import DistroName, DistroSpec, DomainConfig
 
 _VALID_SPEC = {
     "apps": ["org.kde.kcalc"],
@@ -105,7 +105,9 @@ class TestMakeBackend:
 
     def test_fake_backend_gets_fake_shell_on_the_same_screen(self) -> None:
         backend = FakeBackend()
-        shell = _make_shell_factory(backend)(None, None)  # type: ignore[arg-type]
+        domain = DomainConfig(name="sw-x", memory_mib=2048, vcpus=1, disk_gib=20)
+        distro = DistroSpec(name=DistroName.FEDORA_KDE, golden_image=Path("/tmp/g.qcow2"))
+        shell = _make_shell_factory(backend)(domain, distro)
         assert isinstance(shell, FakeShell)
         shell.run(["systemd-run", "--user", "--", "store"])
         assert backend.screen.generation == 1

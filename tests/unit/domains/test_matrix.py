@@ -281,8 +281,10 @@ class TestFakeShell:
         assert screen.generation == 1
 
     def test_factory_returns_same_shell(self) -> None:
+        domain = DomainConfig(name="sw-x", memory_mib=2048, vcpus=1, disk_gib=20)
+        distro = _distro()
         sh = FakeShell()
         factory = fake_shell_factory(sh)
-        assert factory(None, None) is sh
+        assert factory(domain, distro) is sh
         fresh = fake_shell_factory(screen=FakeScreen())
-        assert fresh(None, None) is fresh(None, None)
+        assert fresh(domain, distro) is fresh(domain, distro)
