@@ -190,4 +190,103 @@ Decyzje (wdrożone):
 
 Pomiar po zmianach — niżej.
 
-_(sekcja „Pomiar po poprawkach" — w trakcie)_
+## Pomiar po poprawkach — 2026-08-22 (driver bez `--quit`, rozgrzewka w szablonie)
+
+Uwaga do metody: „hit" z `warm-ws-4` okazał się **buildem** — zabity w locie
+wcześniejszy przebieg zostawił działającą domenę `sw-fedora-ws-warm`, jej port
+SSH był zajęty, więc `lookup()` zgłosił chybienie (`ssh port busy`) i szablon
+został odbudowany. Logika chybienia zadziałała, hit WS mierzony jest niżej
+jeszcze raz.
+
+### Fedora WS
+
+| Faza | `cold-ws-2` (zimny, bez `--quit`) | `warm-ws-3` (build + rozgrzewka) |
+| --- | ---: | ---: |
+| `boot` (create + agent + SSH + sesja) | 15.45 | 16.2 |
+| `warm_save` (rozgrzewka + settle + save) | — | 7.53 |
+| `warm_restore` + gotowość po restore | — | 2.95 + 0.75 |
+| `launch` kcalc / `settle` kcalc | 0.62 / 3.26 (dystans 1.0) | 0.36 / 4.45 (0.52) |
+| `launch` GIMP / `settle` GIMP | 0.27 / 29.87 | 0.27 / 57.98 |
+| `run_total` | **49.8** | 91.0 (w tym jednorazowy build) |
+
+`ready.png` z buildu pokazał **przegląd GNOME bez okna sklepu**: rozgrzewka
+„zmieniła ekran" po ~3 s (GNOME zwija przegląd Aktywności przy starcie
+aplikacji — zmiana całego ekranu, potem stabilność), a okno przyszło dopiero
+30–45 s później — czyli `save` poszedł za wcześnie, a „szybkie" 3.3 s settle
+kcalc w zimnym biegu (dystans 1.0) to to samo zwinięcie przeglądu, nie sklep.
+Stąd **sonda okna** `StoreDriver.window_probe()` (GNOME Shell
+`org.gnome.Shell.Introspect.GetWindows`, Ubuntu: snap-store): settle nie kończy
+się, dopóki sonda nie powie `yes`. Pomiar WS po tej zmianie — niżej.
+
+### Fedora KDE (Discover, bez sondy okna)
+
+| Faza | `warm-kde-1` (build) | `warm-kde-2` (hit) |
+| --- | ---: | ---: |
+| `boot` | 17.9 | — |
+| `warm_save` | 14.02 | — |
+| `warm_restore` + gotowość | 5.56 + 0.52 | 5.57 + 0.46 |
+| `launch` + `settle` kcalc | 0.36 + 3.32 | 0.27 + 3.28 |
+| `launch` + `settle` GIMP | 0.38 + 21.47 | 1.71 + 20.34 |
+| `run_total` | 64.0 | **32.1** |
+
+- Hit KDE: **6 s do gotowej sesji** (restore 5.6 s — plik stanu większy niż na
+  WS) i 32 s na dwie aplikacje.
+- Zrzut Discovera po restore: okno z „Loading…", „Updates (Fetching…)" i
+  modalem **„Update Issue"** (znany punkt TODO) — settle uznał stabilny ekran
+  ładowania za gotowy; Discover nie ma sondy okna/treści. Render Discovera
+  to osobny temat (PackageKit, modal), nie warm cache.
+- `cold-kde-1` **padł**: overlay zimnego klona leżał w `work_root=/tmp/…`
+  (tmpfs); PackageKit zapełnił go w minutę → `IO error … Disk quota exceeded`
+  → VM stanęła → `virsh screenshot` zwracał błąd. Naprawione: `work_root`
+  domyślnie `<image_root>/runs` (`--work-root`). Zimny KDE mierzony jeszcze raz
+  niżej.
+
+### Ubuntu 24.04 (App Center / snap-store)
+
+| Faza | `cold-ubuntu-1` | `warm-ubuntu-1` (build) | `warm-ubuntu-2` (hit) |
+| --- | ---: | ---: | ---: |
+| `wait_agent` | 5.12 | 5.12 | 0.03 |
+| `wait_shell` (SSH) | **119.96** | **120.02** | 0.30 |
+| `wait_session` | 3.61 | 3.65 | 0.27 |
+| `warm_save` (rozgrzewka `snap-store` + settle + save) | — | 17.21 | — |
+| `warm_restore` | — | 4.09 | 3.71 |
+| `settle` kcalc / GIMP | 120 / 120 (bez zmiany) | 120 / 120 | 120 / 120 |
+
+- Zimny boot Ubuntu: **SSH dopiero po ~2 min** (cloud-init na każdym boocie
+  klona bez datasource'u — do wyłączenia w golden: `cloud-init clean` +
+  `/etc/cloud/cloud-init.disabled` przy provisioningu). Hit omija to całkowicie
+  (restore 3.7 s, gotowość 0.6 s).
+- Rozgrzewka działa: `ready.png` szablonu pokazuje w pełni załadowany App
+  Center (Explore).
+- Strona aplikacji nie otwierała się, bo driver robił `xdg-open snap://…`, a
+  handlerem `x-scheme-handler/snap` na tym obrazie jest **`org.gnome.Software.desktop`**
+  (gnome-software też jest zainstalowany). Sonda na żywo: `gio open snap://gimp`
+  otwiera okno GNOME Software (25 % ekranu), **`snap-store snap://gimp` otwiera
+  stronę GIMP-a w App Center** (9.6 % — strona w tym samym oknie; zrzuty
+  aplikacji puste przez wygasły certyfikat appstream.ubuntu.com, jak 18.08).
+  Driver zmieniony na `snap-store snap://<snap>`.
+
+### Sygnał „okno sklepu istnieje" — co nie działa (2026-08-22)
+
+| Pomysł | Wynik |
+| --- | --- |
+| `org.gnome.Shell.Introspect.GetWindows` (+ `gsettings set org.gnome.shell introspect true`) | GNOME Shell **50** (Fedora 44) i GNOME 46 (Ubuntu): `GDBus.Error.AccessDenied: GetWindows is not allowed` |
+| eksport okien GTK na D-Bus (`gdbus introspect --dest org.gnome.Software --recurse` → `/org/gnome/Software/window/1`) | obiekt istnieje **także dla ukrytego** głównego okna usługi `--gapplication-service` — nie odróżnia „schowane" od „widoczne" |
+
+Dlatego drivery zwracają `window_probe() = None` (mechanizm zostaje na KDE/
+kolejne GNOME), a zabezpieczenia są dwa: (a) rozgrzewka szablonu czeka
+`warmup_min_wait` = 60 s zanim `save` (raz na szablon), żeby stan objął
+załadowany sklep; (b) settle aplikacji pozostaje klatkowe — dla pierwszej
+aplikacji w zimnym biegu GNOME zwinięcie przeglądu Aktywności może zamknąć
+settle po ~3 s (dystans ~1.0) zanim okno sklepu się pokaże; weryfikacja
+szablonem (`verify`) pozostaje właściwym arbitrem. Po restore z rozgrzanym
+szablonem sklep już jest na ekranie, więc każda aplikacja to nawigacja.
+
+### Pełna matryca (3 dystrybucje × 2 aplikacje) — pierwsze podejście, skażone
+
+`full-warm-hit` 520 s / `full-cold` 681 s — **nie są miarodajne**: Ubuntu
+(4 × 120 s limitu przez `xdg-open`), WS kcalc (120 s przez fałszywe „no" z
+sondy Introspect w pierwszej wersji), zimny KDE bez błędu dysku: 4.4 + 26.8 s.
+Powtórka po poprawkach — niżej.
+
+_(sekcja „Pełna matryca po poprawkach" — w trakcie)_

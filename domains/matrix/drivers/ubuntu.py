@@ -58,23 +58,23 @@ class UbuntuDriver:
             )
             return []
         log_entry(20, "matrix.driver.ubuntu.snap_open", app=app, snap_name=snap_name)
+        # Nie ``xdg-open``: handlerem ``x-scheme-handler/snap`` na Ubuntu 24.04 jest
+        # ``org.gnome.Software.desktop`` (gnome-software też jest w obrazie), więc
+        # URL szedł do GNOME Software, a App Center stał. ``snap-store`` jest
+        # single-instance — URL trafia do działającej instancji i otwiera stronę
+        # aplikacji (sprawdzone na żywo 2026-08-22).
         return [
-            ["xdg-open", f"snap://{snap_name}"],
+            ["snap-store", f"snap://{snap_name}"],
         ]
 
     def warmup_commands(self) -> list[list[str]]:
         return [["snap-store"]]
 
     def window_probe(self) -> list[str] | None:
-        """Okno snap-store wg ``org.gnome.Shell.Introspect`` (app-id snapa zaczyna się od ``snap-store``)."""
-        return [
-            "sh",
-            "-c",
-            "gsettings set org.gnome.shell introspect true 2>/dev/null; "
-            "gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Introspect "
-            "--method org.gnome.Shell.Introspect.GetWindows 2>/dev/null "
-            "| grep -q -E 'snap-store|io.snapcraft.Store' && echo yes || echo no",
-        ]
+        # GNOME 46 odmawia ``org.gnome.Shell.Introspect.GetWindows`` („not allowed")
+        # nawet z ``introspect=true``; App Center (Flutter) nie eksportuje okien na
+        # D-Bus. Decydują klatki.
+        return None
 
     def preflight_check(self, backend: LibvirtBackend, domain: str) -> str:
         """Sprawdź czy snap-store jest zainstalowany w VM. Zwraca stdout."""

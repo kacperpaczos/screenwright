@@ -82,20 +82,10 @@ class TestWarmupDefaults:
 
 
 class TestWindowProbes:
-    def test_gnome_software_probe_uses_shell_introspect(self) -> None:
-        probe = GnomeSoftwareDriver().window_probe()
-        assert probe is not None
-        assert probe[:2] == ["sh", "-c"]
-        assert "org.gnome.Shell.Introspect.GetWindows" in probe[2]
-        assert "org.gnome.Software" in probe[2]
-        assert "echo yes || echo no" in probe[2]
-
-    def test_ubuntu_probe_matches_snap_store(self) -> None:
-        probe = UbuntuDriver().window_probe()
-        assert probe is not None
-        assert "snap-store" in probe[2]
-
-    def test_drivers_without_probe_return_none(self) -> None:
+    def test_no_driver_has_a_window_probe_yet(self) -> None:
+        """GNOME 46/50 odmawia Introspect.GetWindows, Plasma nie ma odpowiednika — decydują klatki."""
+        assert GnomeSoftwareDriver().window_probe() is None
+        assert UbuntuDriver().window_probe() is None
         assert DiscoverDriver().window_probe() is None
         assert MintInstallDriver().window_probe() is None
         assert AppCenterDriver().window_probe() is None

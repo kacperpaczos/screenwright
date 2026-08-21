@@ -836,7 +836,12 @@ class TestWarmCache:
             work_root=tmp_path / "work",
             shell_factory=fake_shell_factory(shell),
             warm_root=tmp_path / "warm",
+            waits=GuestWaits.instant(warmup_min_wait=8.0, settle_interval=1.0),
         )
+        # rozgrzewka czeka co najmniej warmup_min_wait (tu 8 s zegara testowego): ≥ 9 klatek przed save
+        methods = [c.method for c in backend.calls]
+        shots_before_save = methods[: methods.index("save")].count("screenshot")
+        assert shots_before_save >= 9
         launches = [c for c in shell.calls if c[:1] == ["systemd-run"]]
         assert launches[0][-1] == "plasma-discover", "rozgrzewka: sklep bez aplikacji, przed save"
         assert launches[1][-1] == "--application=appstream:org.kde.kcalc"

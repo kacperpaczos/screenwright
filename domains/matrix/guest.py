@@ -82,6 +82,14 @@ class GuestWaits:
     probe_timeout: float = 20.0
     launch_timeout: float = 60.0
     settle_min_wait: float = 3.0
+    warmup_min_wait: float = 60.0
+    """Minimalny czas od rozgrzewki sklepu do ``virsh save`` w szablonie warm.
+
+    Bez wiarygodnego sygnału „okno sklepu zmapowane" (GNOME 46/50 nie pozwala
+    na ``Introspect.GetWindows``) zwinięcie przeglądu Aktywności wygląda jak
+    gotowość po 3 s, a GNOME Software rysuje okno po 30-45 s. Raz na szablon
+    warto poczekać dłużej, żeby stan zawierał załadowany sklep.
+    """
     settle_timeout: float = 120.0
     settle_interval: float = 1.0
     stable_frames: int = 2
@@ -321,9 +329,11 @@ def window_probe_for(
 ) -> Callable[[], bool | None]:
     """Zamienia komendę-sondę drivera na funkcję ``True``/``False``/``None``.
 
-    ``yes``/``no`` na stdout to odpowiedź; wszystko inne (błąd SSH, brak
-    ``gdbus``, Introspect wyłączony) to ``None`` — wtedy decydują same klatki,
-    a powód idzie do logu raz.
+    ``yes``/``no`` na stdout to odpowiedź; ``unknown`` (sonda sama nie mogła
+    zapytać — brak ``gdbus``, Introspect niedostępny) i wszystko inne (błąd
+    SSH, niejasny tekst) to ``None`` — wtedy decydują same klatki, a powód
+    idzie do logu raz. Ważne: „nie wiem" nie może być „nie", bo ``no`` blokuje
+    settle do limitu.
     """
     logged = False
 
@@ -340,6 +350,11 @@ def window_probe_for(
             return True
         if answer == "no":
             return False
+        if answer == "unknown":
+            if not logged:
+                log_entry(30, "matrix.guest.window_probe_unavailable", probe=" ".join(probe)[:200])
+                logged = True
+            return None
         if not logged:
             log_entry(30, "matrix.guest.window_probe_unclear", answer=answer[:200])
             logged = True

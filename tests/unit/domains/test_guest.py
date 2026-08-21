@@ -299,6 +299,10 @@ class TestWindowProbe:
             window_probe_for(FakeShell(output={"sh -c probe": "garbage"}), probe, waits=waits)()
             is None
         )
+        assert (
+            window_probe_for(FakeShell(output={"sh -c probe": "unknown"}), probe, waits=waits)()
+            is None
+        )
         failing = FakeShell(raise_on_command={"probe"})
         present = window_probe_for(failing, probe, waits=waits)
         assert present() is None

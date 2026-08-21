@@ -44,7 +44,7 @@ class TestUbuntuDriverCommands:
     )
     def test_known_app_emits_xdg_open(self, app_id: str, expected_snap: str) -> None:
         cmds = self.driver.commands_for(app_id)  # type: ignore[arg-type]
-        assert cmds == [["xdg-open", f"snap://{expected_snap}"]]
+        assert cmds == [["snap-store", f"snap://{expected_snap}"]]
 
     def test_unknown_app_returns_empty(self) -> None:
         cmds = self.driver.commands_for("org.example.NoSuchApp")  # type: ignore[arg-type]

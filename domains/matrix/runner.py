@@ -6,7 +6,7 @@ import shutil
 import socket
 import time
 from contextlib import ExitStack, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -506,7 +506,14 @@ def _build_template(
                 if window_probe is not None:
                     present = window_probe_for(clone.shell, window_probe, waits=waits)
             quiet = settle_screenshot(
-                backend, name, ready_png, waits=waits, baseline=baseline, window_present=present
+                backend,
+                name,
+                ready_png,
+                waits=replace(
+                    waits, settle_min_wait=max(waits.settle_min_wait, waits.warmup_min_wait)
+                ),
+                baseline=baseline,
+                window_present=present,
             )
             detail["warmup"] = len(warmup)
             detail["settled"] = quiet.settled
