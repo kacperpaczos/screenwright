@@ -111,6 +111,8 @@ class SettleInfo:
     elapsed: float
     distance: float = 0.0
     """Odległość ostatniej klatki od klatki bazowej (ułamek różniących się pikseli)."""
+    window: bool | None = None
+    """Odpowiedź sondy okna przy ostatniej ocenie (``None`` = bez sondy / nie wiadomo)."""
 
 
 @dataclass(frozen=True)
@@ -244,6 +246,7 @@ def settle_screenshot(
     *,
     waits: GuestWaits,
     baseline: Frame | None = None,
+    window_present: Callable[[], bool | None] | None = None,
 ) -> SettleInfo:
     """Robi zrzuty, aż ``stable_frames`` kolejnych klatek jest „takich samych".
 
@@ -251,8 +254,12 @@ def settle_screenshot(
     oddalić od punktu odniesienia o więcej niż ``change_threshold`` — inaczej
     to sklep, który się jeszcze nie narysował (a tykający zegar w pasku nie
     liczy się za zmianę). „Takie same" = odległość pikselowa poniżej
-    ``stable_threshold``. Ostatnia klatka zostaje w ``out_path``; po
-    ``settle_timeout`` oddajemy, co mamy, z ``settled=False`` (zrzut jest
+    ``stable_threshold``. ``window_present`` (sonda drivera, np. lista okien
+    GNOME Shell) odpowiada ``True``/``False``/``None`` = nie wiem; dopóki mówi
+    ``False``, zrzut nie jest gotowy, choćby klatki stały — GNOME zwija
+    przegląd Aktywności przy starcie aplikacji, co wygląda jak „zmiana", a okno
+    sklepu przychodzi 30-45 s później. Ostatnia klatka zostaje w ``out_path``;
+    po ``settle_timeout`` oddajemy, co mamy, z ``settled=False`` (zrzut jest
     lepszy niż brak dowodu).
     """
     started = waits.clock()
@@ -261,6 +268,7 @@ def settle_screenshot(
     frames = 0
     changed = baseline is None
     distance = 0.0
+    window: bool | None = None
     while True:
         backend.screenshot(name, out_path)
         frames += 1
@@ -276,9 +284,16 @@ def settle_screenshot(
         previous = frame
         elapsed = waits.clock() - started
         if changed and repeats >= waits.stable_frames and elapsed >= waits.settle_min_wait:
-            return SettleInfo(
-                frames=frames, settled=True, changed=True, elapsed=elapsed, distance=distance
-            )
+            window = window_present() if window_present is not None else None
+            if window is not False:
+                return SettleInfo(
+                    frames=frames,
+                    settled=True,
+                    changed=True,
+                    elapsed=elapsed,
+                    distance=distance,
+                    window=window,
+                )
         if elapsed >= waits.settle_timeout:
             log_entry(
                 30,
@@ -286,13 +301,51 @@ def settle_screenshot(
                 domain=name,
                 frames=frames,
                 changed=changed,
+                window=window,
                 distance=round(distance, 4),
                 elapsed=elapsed,
             )
             return SettleInfo(
-                frames=frames, settled=False, changed=changed, elapsed=elapsed, distance=distance
+                frames=frames,
+                settled=False,
+                changed=changed,
+                elapsed=elapsed,
+                distance=distance,
+                window=window,
             )
         waits.sleep(waits.settle_interval)
+
+
+def window_probe_for(
+    shell: GuestShell, probe: list[str], *, waits: GuestWaits
+) -> Callable[[], bool | None]:
+    """Zamienia komendę-sondę drivera na funkcję ``True``/``False``/``None``.
+
+    ``yes``/``no`` na stdout to odpowiedź; wszystko inne (błąd SSH, brak
+    ``gdbus``, Introspect wyłączony) to ``None`` — wtedy decydują same klatki,
+    a powód idzie do logu raz.
+    """
+    logged = False
+
+    def present() -> bool | None:
+        nonlocal logged
+        try:
+            answer = shell.run(probe, timeout=waits.probe_timeout).strip()
+        except Exception as exc:
+            if not logged:
+                log_entry(30, "matrix.guest.window_probe_failed", error=str(exc)[:300])
+                logged = True
+            return None
+        if answer == "yes":
+            return True
+        if answer == "no":
+            return False
+        if not logged:
+            log_entry(30, "matrix.guest.window_probe_unclear", answer=answer[:200])
+            logged = True
+        return None
+
+    return present
 
 
 __all__ = [
@@ -309,4 +362,5 @@ __all__ = [
     "wait_for_agent",
     "wait_for_session",
     "wait_for_shell",
+    "window_probe_for",
 ]

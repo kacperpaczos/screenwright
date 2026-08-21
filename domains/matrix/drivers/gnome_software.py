@@ -24,3 +24,14 @@ class GnomeSoftwareDriver:
 
     def warmup_commands(self) -> list[list[str]]:
         return [["gnome-software"]]
+
+    def window_probe(self) -> list[str] | None:
+        """Okno GNOME Software wg ``org.gnome.Shell.Introspect`` (app-id ``org.gnome.Software``)."""
+        return [
+            "sh",
+            "-c",
+            "gsettings set org.gnome.shell introspect true 2>/dev/null; "
+            "gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Introspect "
+            "--method org.gnome.Shell.Introspect.GetWindows 2>/dev/null "
+            "| grep -q org.gnome.Software && echo yes || echo no",
+        ]

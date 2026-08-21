@@ -41,6 +41,16 @@ class StoreDriver(Protocol):
         """
         ...
 
+    def window_probe(self) -> list[str] | None:
+        """Komenda (w sesji użytkownika) wypisująca ``yes``, gdy okno sklepu istnieje, ``no`` gdy nie.
+
+        Same klatki mylą: GNOME zwija przegląd Aktywności w chwili startu
+        aplikacji (duża zmiana ekranu), a okno sklepu rysuje się 30-45 s później.
+        ``settle_screenshot`` nie uzna zrzutu za gotowy, dopóki sonda nie powie
+        ``yes``. ``None`` = brak sondy, decydują same klatki.
+        """
+        ...
+
 
 @runtime_checkable
 class GuestShell(Protocol):

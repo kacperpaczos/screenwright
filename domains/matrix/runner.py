@@ -29,6 +29,7 @@ from domains.matrix.guest import (
     wait_for_agent,
     wait_for_session,
     wait_for_shell,
+    window_probe_for,
 )
 from domains.matrix.models import (
     _MATRIX_STEP_VERBS,
@@ -204,6 +205,7 @@ def execute(
                     log_entry(30, "matrix.warm.busy", distro=distro_label)
 
             driver = (drivers or {}).get(distro.name)
+            probe_cmd = driver.window_probe() if driver is not None else None
             clone: _Clone | None = None
             if not spec.dry_run:
                 clone = _bring_up(
@@ -213,9 +215,15 @@ def execute(
                     work_root=work_root,
                     warm_cache=warm_here,
                     warmup=driver.warmup_commands() if driver is not None else [],
+                    window_probe=probe_cmd,
                     waits=waits,
                     timings=timings,
                 )
+            window_present = (
+                window_probe_for(clone.shell, probe_cmd, waits=waits)
+                if clone is not None and probe_cmd is not None
+                else None
+            )
 
             try:
                 for app in spec.apps:
@@ -235,12 +243,18 @@ def execute(
                                     launch(clone.shell, commands, waits=waits)
                         with _timed(timings, distro_label, app, "settle") as detail:
                             settled = settle_screenshot(
-                                backend, clone.name, actual, waits=waits, baseline=baseline
+                                backend,
+                                clone.name,
+                                actual,
+                                waits=waits,
+                                baseline=baseline,
+                                window_present=window_present,
                             )
                             detail["frames"] = settled.frames
                             detail["settled"] = settled.settled
                             detail["changed"] = settled.changed
                             detail["distance"] = round(settled.distance, 4)
+                            detail["window"] = settled.window
                     template = _resolve_template(spec.templates_dir, distro.name, app)
                     with _timed(timings, distro_label, app, "verify"):
                         score = matcher.match(template, actual)
@@ -440,6 +454,7 @@ def _build_template(
     *,
     work_root: Path,
     warmup: list[list[str]],
+    window_probe: list[str] | None,
     waits: GuestWaits,
     timings: list[PhaseTiming],
 ) -> _Clone:
@@ -478,13 +493,19 @@ def _build_template(
         with _timed(timings, label, None, "warm_save") as detail:
             ready_png = directory / "ready.png"
             baseline: Frame | None = None
+            present = None
             if warmup:
                 baseline = capture_frame(backend, name, ready_png)
                 launch(clone.shell, warmup, waits=waits)
-            quiet = settle_screenshot(backend, name, ready_png, waits=waits, baseline=baseline)
+                if window_probe is not None:
+                    present = window_probe_for(clone.shell, window_probe, waits=waits)
+            quiet = settle_screenshot(
+                backend, name, ready_png, waits=waits, baseline=baseline, window_present=present
+            )
             detail["warmup"] = len(warmup)
             detail["settled"] = quiet.settled
             detail["changed"] = quiet.changed
+            detail["window"] = quiet.window
             backend.save(name, directory / STATE_NAME)
     except Exception as exc:
         log_entry(30, "matrix.warm.save_failed", distro=label, error=str(exc))
@@ -512,6 +533,7 @@ def _bring_up(
     work_root: Path,
     warm_cache: WarmCache | None,
     warmup: list[list[str]],
+    window_probe: list[str] | None,
     waits: GuestWaits,
     timings: list[PhaseTiming],
 ) -> _Clone:
@@ -531,6 +553,7 @@ def _bring_up(
             warm_cache,
             work_root=work_root,
             warmup=warmup,
+            window_probe=window_probe,
             waits=waits,
             timings=timings,
         )

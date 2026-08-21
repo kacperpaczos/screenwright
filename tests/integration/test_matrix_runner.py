@@ -193,6 +193,9 @@ class TestMatrixRunner:
             def warmup_commands(self) -> list[list[str]]:
                 return []
 
+            def window_probe(self) -> list[str] | None:
+                return None
+
         spec = MatrixRunSpec(
             apps=["org.kde.kcalc"],  # type: ignore[arg-type]
             distros=[_distro(DistroName.FEDORA_KDE)],
@@ -219,6 +222,9 @@ class TestMatrixRunner:
 
             def warmup_commands(self) -> list[list[str]]:
                 return []
+
+            def window_probe(self) -> list[str] | None:
+                return None
 
         spec = MatrixRunSpec(
             apps=["org.kde.kcalc"],  # type: ignore[arg-type]
@@ -255,6 +261,9 @@ class TestMatrixRunner:
 
             def warmup_commands(self) -> list[list[str]]:
                 return []
+
+            def window_probe(self) -> list[str] | None:
+                return None
 
         backend = FakeBackend(raise_on={"destroy"})
         shell = FakeShell(raise_on_command={"broken-store-command"})
@@ -550,11 +559,60 @@ class TestGuestSession:
             def warmup_commands(self) -> list[list[str]]:
                 return []
 
+            def window_probe(self) -> list[str] | None:
+                return None
+
         shell = FakeShell()
         self._run(tmp_path, FakeBackend(), shell, driver=_ThreeStep())
         launches = [c for c in shell.calls if c[:1] == ["systemd-run"]]
         assert ["--wait" in c for c in launches] == [True, True, False]
         assert [c[-1] for c in launches] == ["--quit", "--refresh", "--details=org.kde.kcalc"]
+
+    def test_window_probe_is_consulted_and_recorded(self, tmp_path: Path) -> None:
+        """Sonda okna drivera gatuje settle: 'no' → czekamy, 'yes' → zrzut gotowy."""
+
+        class _ProbingDriver:
+            distro = DistroName.FEDORA_KDE
+
+            def commands_for(self, app: str) -> list[list[str]]:
+                return [["store", f"--details={app}"]]
+
+            def warmup_commands(self) -> list[list[str]]:
+                return []
+
+            def window_probe(self) -> list[str] | None:
+                return ["sh", "-c", "probe-window"]
+
+        screen = FakeScreen()
+        answers = iter(["no", "no", "yes"])
+
+        class _ProbeShell(FakeShell):
+            def run(self, command: list[str], timeout: float = 30.0) -> str:
+                if command == ["sh", "-c", "probe-window"]:
+                    self.calls.append(list(command))
+                    return next(answers, "yes")
+                return super().run(command, timeout)
+
+        shell = _ProbeShell(screen=screen)
+        backend = FakeBackend(screen=screen)
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[DistroSpec(name=DistroName.FEDORA_KDE, golden_image=tmp_path / "g.qcow2")],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        report = execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            drivers={DistroName.FEDORA_KDE: _ProbingDriver()},  # type: ignore[dict-item]
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(shell),
+        )
+        assert shell.calls.count(["sh", "-c", "probe-window"]) == 3
+        settle = next(t for t in report.timings if t.phase == "settle")
+        assert settle.detail["window"] is True
+        assert settle.detail["settled"] is True
 
     def test_readiness_precedes_launch(self, tmp_path: Path) -> None:
         screen = FakeScreen()
@@ -1032,6 +1090,9 @@ class TestStoreProxyIntegration:
 
             def warmup_commands(self) -> list[list[str]]:
                 return []
+
+            def window_probe(self) -> list[str] | None:
+                return None
 
         proxy = _FakeProxy()
         spec = MatrixRunSpec(

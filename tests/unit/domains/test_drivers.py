@@ -79,3 +79,23 @@ class TestWarmupDefaults:
     def test_unsupported_drivers_have_no_warmup(self) -> None:
         assert MintInstallDriver().warmup_commands() == []
         assert AppCenterDriver().warmup_commands() == []
+
+
+class TestWindowProbes:
+    def test_gnome_software_probe_uses_shell_introspect(self) -> None:
+        probe = GnomeSoftwareDriver().window_probe()
+        assert probe is not None
+        assert probe[:2] == ["sh", "-c"]
+        assert "org.gnome.Shell.Introspect.GetWindows" in probe[2]
+        assert "org.gnome.Software" in probe[2]
+        assert "echo yes || echo no" in probe[2]
+
+    def test_ubuntu_probe_matches_snap_store(self) -> None:
+        probe = UbuntuDriver().window_probe()
+        assert probe is not None
+        assert "snap-store" in probe[2]
+
+    def test_drivers_without_probe_return_none(self) -> None:
+        assert DiscoverDriver().window_probe() is None
+        assert MintInstallDriver().window_probe() is None
+        assert AppCenterDriver().window_probe() is None

@@ -18,6 +18,7 @@ from domains.matrix.guest import (
     wait_for_agent,
     wait_for_session,
     wait_for_shell,
+    window_probe_for,
 )
 
 
@@ -247,3 +248,58 @@ class TestSettleScreenshot:
         assert info.changed is True
         assert info.frames == 6
         assert (tmp_path / "shot.png").read_bytes() == b"frame-6"
+
+
+class TestWindowProbe:
+    def test_settle_waits_for_window_then_settles(self, tmp_path: Path) -> None:
+        screen = FakeScreen()
+        backend = FakeBackend(screen=screen)
+        out = tmp_path / "shot.png"
+        baseline = capture_frame(backend, "vm", out)
+        screen.bump()  # przegląd się zwinął — duża zmiana, ale okna jeszcze nie ma
+        answers = iter([False, False, True])
+        waits = GuestWaits.instant(settle_min_wait=0.0, stable_frames=2, settle_interval=1.0)
+        info = settle_screenshot(
+            backend, "vm", out, waits=waits, baseline=baseline, window_present=lambda: next(answers)
+        )
+        assert info.settled is True
+        assert info.window is True
+        assert info.frames == 4  # 2 klatki stabilne + 2 dodatkowe rundy „no"
+
+    def test_settle_gives_up_when_window_never_appears(self, tmp_path: Path) -> None:
+        backend = FakeBackend()
+        out = tmp_path / "shot.png"
+        waits = GuestWaits.instant(settle_min_wait=0.0, settle_timeout=4.0, settle_interval=1.0)
+        info = settle_screenshot(backend, "vm", out, waits=waits, window_present=lambda: False)
+        assert info.settled is False
+        assert info.window is False
+
+    def test_unknown_answer_does_not_block(self, tmp_path: Path) -> None:
+        info = settle_screenshot(
+            FakeBackend(),
+            "vm",
+            tmp_path / "shot.png",
+            waits=GuestWaits.instant(settle_min_wait=0.0),
+            window_present=lambda: None,
+        )
+        assert info.settled is True
+        assert info.window is None
+
+    def test_window_probe_for_maps_yes_no_and_errors(self) -> None:
+        probe = ["sh", "-c", "probe"]
+        waits = GuestWaits.instant()
+        assert (
+            window_probe_for(FakeShell(output={"sh -c probe": "yes\n"}), probe, waits=waits)()
+            is True
+        )
+        assert (
+            window_probe_for(FakeShell(output={"sh -c probe": "no"}), probe, waits=waits)() is False
+        )
+        assert (
+            window_probe_for(FakeShell(output={"sh -c probe": "garbage"}), probe, waits=waits)()
+            is None
+        )
+        failing = FakeShell(raise_on_command={"probe"})
+        present = window_probe_for(failing, probe, waits=waits)
+        assert present() is None
+        assert present() is None  # drugi raz też None, bez wyjątku

@@ -65,6 +65,17 @@ class UbuntuDriver:
     def warmup_commands(self) -> list[list[str]]:
         return [["snap-store"]]
 
+    def window_probe(self) -> list[str] | None:
+        """Okno snap-store wg ``org.gnome.Shell.Introspect`` (app-id snapa zaczyna się od ``snap-store``)."""
+        return [
+            "sh",
+            "-c",
+            "gsettings set org.gnome.shell introspect true 2>/dev/null; "
+            "gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Introspect "
+            "--method org.gnome.Shell.Introspect.GetWindows 2>/dev/null "
+            "| grep -q -E 'snap-store|io.snapcraft.Store' && echo yes || echo no",
+        ]
+
     def preflight_check(self, backend: LibvirtBackend, domain: str) -> str:
         """Sprawdź czy snap-store jest zainstalowany w VM. Zwraca stdout."""
         return backend.qemu_agent_exec(domain, ["snap", "list", "snap-store"], timeout=15.0)

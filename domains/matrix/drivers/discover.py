@@ -26,5 +26,10 @@ class DiscoverDriver:
     def warmup_commands(self) -> list[list[str]]:
         return [["plasma-discover"]]
 
+    def window_probe(self) -> list[str] | None:
+        # Plasma nie ma odpowiednika Introspect bez skryptu KWin; Discover startuje
+        # osobnym procesem i mapuje okno w sekundy, więc wystarczają klatki.
+        return None
+
 
 __all__ = ["DiscoverDriver"]
