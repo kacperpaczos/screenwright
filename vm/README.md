@@ -4,7 +4,8 @@ Automat do uruchamiania rzeczywistych software-centrów Linuksa w VMkach
 libvirt, deployowania naszych screenshotów AppStream i sprawdzania, czy
 sklep pokazuje to, co powinien.
 
-Pełen plan i tło: `../docs/plans/6-vm-matrix.md`.
+Pełen plan i tło: `../docs/plans/6-vm-matrix.md`. Bieżący stan prac:
+`../TODO.md` §6.
 
 ## Po co trzy maszyny
 
@@ -25,73 +26,90 @@ nie da się rozdzielić wpływu sklepu od wpływu dystrybucji.
 Uwaga: Ubuntu 24.04 **nie instaluje GNOME Software domyślnie** (zastąpione
 przez App Center / snap-store), dlatego seed dokłada je jawnie.
 
-## Stan
+## Wszystko bez roota
 
-- **M0 — host prep: zrobione.** Paczki (`@virtualization`, `virt-install`,
-  `virt-viewer`, `guestfs-tools`), `libvirtd`, struktura katalogów.
-- **M1 — golden images: skrypty gotowe, obrazy do zbudowania.** Wcześniejsze
-  przebiegi używały obrazów Cloud/server (bez desktopu, bez sklepu) i
-  `FakeBackend` — patrz `../docs/snap-store-diagnostics.md`.
+Cały tor — budowa obrazów, klony, przebieg matrycy, podgląd — chodzi na
+`qemu:///session`:
 
-## Wymagania hosta
+- obrazy leżą w `~/.local/share/screenwright/images/` (`SCREENWRIGHT_IMAGE_ROOT`),
+- sieć to usermode `passt`; gość nie ma adresu osiągalnego z hosta, więc SSH
+  wchodzi przez **przekierowany port na 127.0.0.1** (runner nadaje każdej
+  domenie wolny port, `vm/scripts/ubuntu-ssh.sh` wyciąga go z żywego XML-a),
+- `/dev/kvm` jest dostępne dla wszystkich, `libguestfs` działa bez uprawnień.
+
+Jedyne, co wymaga `sudo`, to instalacja paczek na hoście:
 
 ```bash
-sudo dnf install @virtualization virt-install virt-viewer guestfs-tools
-sudo systemctl enable --now libvirtd
-# Jednorazowo:
-sudo usermod -aG libvirt $USER   # potem nowe logowanie
+sudo dnf install virt-install virt-viewer guestfs-tools passt xorriso libosinfo
 ```
+
+Nie trzeba włączać `libvirtd`, dopisywać się do grupy `libvirt` ani nic
+konfigurować w `/etc/libvirt` — demon sesyjny startuje sam przy pierwszym
+`virsh -c qemu:///session`.
 
 ## Struktura katalogów
 
 ```
-/var/lib/libvirt/images/
-  golden/                    # golden images (read-only, chmod 444)
-    fedora-kde-44.qcow2
-    fedora-ws-44.qcow2
-    ...
-  state/                     # virsh save state files (per golden)
-    fedora-kde-44.qcow2.save.zst
+~/.local/share/screenwright/images/      # SCREENWRIGHT_IMAGE_ROOT
+  golden/                                # golden images (chmod 444)
+    fedora-ws.qcow2
+    fedora-kde.qcow2
+    ubuntu-24.04.qcow2
+    .cache-noble-server-cloudimg-amd64.img   # cache cloud image'a Ubuntu
+  seed/
+    ubuntu-24.04-seed.iso                # NoCloud seed użyty przy budowie
+  build/                                 # katalogi robocze budowy (+ console.log)
 
 # Tu w repo:
 vm/
-  README.md                  # ten plik
-  templates/
-    domain.xml.j2            # kanoniczny szablon domeny
+  README.md                 # ten plik
   build/
-    fedora-kde-44.ks         # kickstart dla nowego golden image
-    seed-golden.sh           # weź cloud image → golden (autologin, agenty)
-    run-matrix.sh            # wrapper na `python -m cli matrix --execute`
+    build-keypair.sh        # para kluczy SSH wstrzykiwana do wszystkich obrazów
+    install-ssh-config.sh   # wpis Host screenwright-ubuntu w ~/.ssh/config
+    install-fedora.sh       # Fedora WS / KDE: Anaconda + kickstart z distro_builders
+    seed-ubuntu.sh          # Ubuntu: cloud image + NoCloud seed → pełny desktop
+    run-matrix.sh           # wrapper na `python -m cli matrix --execute`
+  scripts/
+    ubuntu-ssh.sh           # SSH do domeny (port z <portForward> w dumpxml)
+    diagnose-ubuntu.sh      # diagnostyka snap-store w gościu → JSON
+    diagnose_ubuntu.py
 ```
+
+XML domeny renderuje `domains/matrix/domain_xml.py` (szablon Jinja2 wpisany
+w kod) — to jedyne źródło prawdy o konfiguracji maszyny.
 
 ## Tworzenie golden images
 
 Każdy obraz to **pełna, normalna instalacja dystrybucji** z otwartym SSH,
-autologinem i `qemu-guest-agent`. Nie cloud/server image — te nie mają
-desktopu ani sklepu, więc `virsh screenshot` łapie na nich prompt logowania.
+autologinem użytkownika `test` i `qemu-guest-agent`. Nie cloud/server image —
+te nie mają desktopu ani sklepu, więc `virsh screenshot` łapie na nich prompt
+logowania.
 
-Najpierw raz, bez `sudo`, para kluczy — wszystkie instalatory ją wstrzykują:
+Najpierw raz para kluczy — wszystkie instalatory ją wstrzykują:
 
 ```bash
 vm/build/build-keypair.sh          # ~/.ssh/screenwright_ubuntu{,.pub}
 ```
 
-Potem trzy budowy. Każda jest nienadzorowana i kończy się sama; nie wymagają
-siebie nawzajem, więc można je odpalać w dowolnej kolejności.
+Potem trzy budowy, **sekwencyjnie** (trzy naraz wyczerpały RAM hosta i OOM
+killer ubił jedną w trakcie kompresji). Każda jest nienadzorowana i kończy
+się sama; ~2 h łącznie.
 
 ```bash
 # Fedora Workstation — GNOME + GNOME Software      (~30-60 min)
-sudo vm/build/install-fedora.sh ws
+vm/build/install-fedora.sh ws
 
 # Fedora KDE — Plasma + Discover                    (~30-60 min)
-sudo vm/build/install-fedora.sh kde
+vm/build/install-fedora.sh kde
 
 # Ubuntu 24.04 — GNOME + GNOME Software + snap-store (~20-40 min)
-sudo vm/build/seed-ubuntu.sh
+vm/build/seed-ubuntu.sh
 ```
 
 Postęp widać w logu konsoli, którego ścieżkę skrypt wypisuje na starcie
-(`tail -f /tmp/screenwright-*/console.log`).
+(`tail -f ~/.local/share/screenwright/images/build/<wariant>.XXXXXX/console.log`).
+Katalog roboczy jest kasowany tylko po sukcesie — po porażce zostaje razem
+z obrazem w budowie.
 
 Jak to działa:
 
@@ -113,7 +131,7 @@ desktop od nowa przy każdym przebiegu.
 Po budowie sprawdź maszynę ręcznie:
 
 ```bash
-virsh -c qemu:///system list --all
+virsh -c qemu:///session list --all
 python -m cli vm ssh <domena> -- snap list          # Ubuntu
 python -m cli vm ssh <domena> -- systemctl status qemu-guest-agent
 python -m cli vm snapshot <domena> /tmp/sprawdzam.png
@@ -140,26 +158,23 @@ python -m cli matrix --spec matrix-spec.json --execute \
 Raport ląduje w `vm/reports/matrix.json` (struktura: `MatrixReport`
 z `shared/results.py`).
 
-## Save / restore (cross-run warm cache)
+## Save / restore (ciepły start)
 
-Po pełnym boocie i pierwszej konfiguracji golden image'a warto zapisać
-RAM do pliku — kolejne matryce startują w 1 s zamiast 30 s:
+`VirshBackend` ma `save()` / `restore()` (`virsh save` działa dla domen
+transient, w przeciwieństwie do `managedsave`), ale runner jeszcze ich nie
+używa — każdy przebieg bootuje na zimno. Dwie rzeczy warto ustawić zawczasu:
 
-```bash
-virsh save <vm-name> /var/lib/libvirt/images/state/fedora-kde-44.qcow2.save.zst
-```
-
-W pliku konfiguracyjnym libvirtd ustaw `save_image_format = "zstd"` —
-pliki stanu mają rozmiar RAM-u (~960 MB dla 2 GB gościa).
-
-Po `dnf upgrade` na hoście save file jest nieaktualny. Usuń go i
-pozwól, by następny przebieg wykonał cold boot.
+- Plik stanu ma rozmiar RAM-u gościa. W trybie sesji demon czyta
+  `~/.config/libvirt/qemu.conf` (bez sudo); `save_image_format = "zstd"`
+  daje ~2× mniejsze pliki.
+- Po `dnf upgrade` QEMU na hoście zapisany stan jest nieaktualny — trzeba go
+  wyrzucić i pozwolić na zimny boot.
 
 ## Zdalny podgląd (human in the loop)
 
 ```bash
-virt-viewer -c qemu:///system <vm-name>     # VNC
-remote-viewer $(virsh domdisplay <vm-name>)
+python -m cli vm view <vm-name>              # virt-viewer na qemu:///session
+virt-viewer -c qemu:///session <vm-name>     # to samo wprost
 ```
 
 Podgląd działa równolegle z matrycą — można podpiąć się w trakcie i
@@ -170,15 +185,15 @@ odetchnąć bez wpływu na wynik.
 - **Cloud/server image ≠ image do testów sklepu.** `Fedora Cloud Edition`
   i `noble-server-cloudimg` nie mają ani Discover, ani snap-store — VM
   wstaje na konsolę tekstową i `virsh screenshot` łapie prompt logowania.
-  Golden musi być spinem desktopowym (KDE) albo cloud image'em z doinstalowanym
-  desktopem przez NoCloud seed (patrz `seed-ubuntu.sh`).
+  Golden musi być pełną instalacją desktopu (patrz wyżej).
 - **Seed ISO musi być podpięte do domeny**, nie tylko do `virt-customize`.
-  Ścieżka idzie przez `DistroSpec.seed_iso` → `render_domain_xml(cdrom_path=…)`.
+  Ścieżka idzie przez `DistroSpec.seed_iso` → `render_domain_xml(cdrom_path=…)`
+  — używana tylko przy budowie, nigdy dla klonów.
 - `plasma-discover --application` działa na Discover 6.7+; starsze wersje
   wymagają D-Bus (niezweryfikowane).
 - Drivery mintinstall/AppCenter są puste do czasu TODO §3 (decyzja które
   sklepy testujemy dla każdej dystrybucji). Ubuntu ma driver snap-store,
   ale sama **podmiana** screenshotów przez snap-store-proxy nie ma
-  zweryfikowanej ścieżki wpięcia — patrz `docs/snap-store-diagnostics.md`.
-- Zegar gościa rozjeżdża się po `virsh restore` (brak RTC w cloud
-  image'ach). Dla screenshotów bez znaczenia.
+  zweryfikowanej ścieżki wpięcia — patrz `../docs/snap-store-diagnostics.md`.
+- Zegar gościa rozjeżdża się po `virsh restore`. Dla screenshotów bez
+  znaczenia.

@@ -55,8 +55,7 @@ CLI args → Pydantic model (StrictSpec) → domena X
 W `shared/ports.py` zdefiniowane są wspólne porty:
 
 - `SourceFetcher`, `IndexStorage` — używane przez corpus
-- `Reporter` — używane przez matrix/verification
-- `StoreDriver`, `LibvirtBackend` — używane przez matrix
+- `LibvirtBackend` — używany przez matrix (runner, CLI, drivery)
 
 Domeny definiują swoje własne porty w `domains/<name>/ports.py`:
 

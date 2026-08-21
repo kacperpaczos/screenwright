@@ -41,22 +41,6 @@ class IndexStorage(Protocol):
 
 
 @runtime_checkable
-class Reporter(Protocol):
-    """Zapisuje wyniki weryfikacji."""
-
-    def record(self, payload: dict[str, object]) -> None: ...
-
-
-@runtime_checkable
-class StoreDriver(Protocol):
-    """Adapter konkretnego software centre."""
-
-    def open_app_page(self, app: AppId) -> list[str]:
-        """Zwraca listę komend (bez wykonania). Wykonanie przez Backend."""
-        ...
-
-
-@runtime_checkable
 class LibvirtBackend(Protocol):
     """Abstrakcja nad virsh/libvirt.
 
@@ -83,7 +67,5 @@ class LibvirtBackend(Protocol):
 __all__ = [
     "IndexStorage",
     "LibvirtBackend",
-    "Reporter",
     "SourceFetcher",
-    "StoreDriver",
 ]
