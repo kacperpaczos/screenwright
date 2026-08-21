@@ -17,30 +17,6 @@ class DistroName(StrEnum):
     ELEMENTARY = "elementary-8"
 
 
-class DistroSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: DistroName
-    golden_image: Path
-    build_artifact: Path | None = None
-    installer_iso: HttpUrl | None = None
-    domain_overrides: dict[str, Any] = Field(default_factory=dict)
-    store_proxy: Literal["snap-store"] | None = None
-    seed_iso: Path | None = None
-    """NoCloud seed ISO podpinane jako cdrom przy tworzeniu domeny.
-
-    cloud-init w gościu szuka wolumenu z etykietą ``cidata``; bez podpięcia
-    seed ISO do domeny (a nie tylko na czas ``virt-customize``) user-data
-    nigdy nie zostanie zaaplikowane. Patrz ``vm/build/seed-ubuntu.sh``.
-    """
-
-    @field_validator("golden_image", "build_artifact", "seed_iso", mode="after")
-    @classmethod
-    def _expand_user(cls, v: Path | None) -> Path | None:
-        """`~` w spec JSON-ie ma działać — obrazy leżą w HOME (tryb session)."""
-        return v.expanduser() if v is not None else None
-
-
 class DomainConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -59,6 +35,66 @@ class DomainConfig(BaseModel):
     SSH. Runner nadaje każdej domenie wolny port, żeby dwie równoległe
     maszyny się nie pobiły.
     """
+
+
+DEFAULT_DOMAIN: dict[str, Any] = {
+    "memory_mib": 4096,
+    "vcpus": 2,
+    "disk_gib": 20,
+    "graphics": "vnc",
+    "listen": "127.0.0.1",
+    "enable_3d": False,
+}
+"""Sprzęt klona, gdy ``DistroSpec.domain_overrides`` nic nie mówi.
+
+Pełny desktop (Plasma, GNOME) poniżej 4 GiB zaczyna swapować przy otwartym
+sklepie; 2 vCPU to minimum, przy którym kompozytor nie dławi się na starcie.
+"""
+
+RUNNER_OWNED_DOMAIN_FIELDS = frozenset({"name", "ssh_port"})
+"""Pola ``DomainConfig`` nadawane przez runner per klon — spec nie może ich nadpisać."""
+
+
+class DistroSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: DistroName
+    golden_image: Path
+    build_artifact: Path | None = None
+    installer_iso: HttpUrl | None = None
+    domain_overrides: dict[str, Any] = Field(default_factory=dict)
+    """Nadpisania ``DomainConfig`` dla tej dystrybucji (np. ``{"memory_mib": 2048}``).
+
+    Klucze muszą być polami ``DomainConfig`` poza ``name`` i ``ssh_port`` —
+    literówka albo próba ustawienia nazwy wychodzi przy wczytaniu specu, nie w
+    środku przebiegu.
+    """
+    store_proxy: Literal["snap-store"] | None = None
+    seed_iso: Path | None = None
+    """NoCloud seed ISO podpinane jako cdrom przy tworzeniu domeny.
+
+    cloud-init w gościu szuka wolumenu z etykietą ``cidata``; bez podpięcia
+    seed ISO do domeny (a nie tylko na czas ``virt-customize``) user-data
+    nigdy nie zostanie zaaplikowane. Patrz ``vm/build/seed-ubuntu.sh``.
+    """
+
+    @field_validator("golden_image", "build_artifact", "seed_iso", mode="after")
+    @classmethod
+    def _expand_user(cls, v: Path | None) -> Path | None:
+        """`~` w spec JSON-ie ma działać — obrazy leżą w HOME (tryb session)."""
+        return v.expanduser() if v is not None else None
+
+    @field_validator("domain_overrides", mode="after")
+    @classmethod
+    def _overrides_are_domain_fields(cls, v: dict[str, Any]) -> dict[str, Any]:
+        allowed = set(DomainConfig.model_fields) - RUNNER_OWNED_DOMAIN_FIELDS
+        rejected = sorted(set(v) - allowed)
+        if rejected:
+            raise ValueError(
+                f"domain_overrides: unknown or runner-owned keys {rejected}; "
+                f"allowed: {sorted(allowed)}"
+            )
+        return v
 
 
 class MatrixRunSpec(BaseModel):
@@ -128,6 +164,8 @@ class MatrixStep(BaseModel):
 
 
 __all__ = [
+    "DEFAULT_DOMAIN",
+    "RUNNER_OWNED_DOMAIN_FIELDS",
     "_MATRIX_STEP_VERBS",
     "DistroName",
     "DistroSpec",

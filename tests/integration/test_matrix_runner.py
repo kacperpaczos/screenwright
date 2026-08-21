@@ -7,6 +7,7 @@ import pytest
 from domains.matrix.backend.fake import FakeBackend
 from domains.matrix.models import DistroName, DistroSpec, MatrixRunSpec
 from domains.matrix.runner import _default_matcher, _teardown, execute, plan
+from pydantic import ValidationError
 
 
 def _spec(distros: list[DistroSpec], apps: list[str]) -> MatrixRunSpec:
@@ -347,6 +348,68 @@ class TestSeedIsoAttachment:
     def test_no_cdrom_when_seed_iso_absent(self, tmp_path: Path) -> None:
         xml = self._run(tmp_path, None)
         assert 'device="cdrom"' not in xml
+
+
+class TestDomainOverrides:
+    """`DistroSpec.domain_overrides` ma trafiać do XML-a klona.
+
+    Pole istniało od początku, ale runner je ignorował i renderował 4096 MiB /
+    2 vCPU na sztywno — nie dało się ani odchudzić maszyny pod warm cache, ani
+    wpuścić SPICE na hoście, który go jeszcze ma.
+    """
+
+    def _run(self, tmp_path: Path, overrides: dict[str, object]) -> tuple[FakeBackend, str]:
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[
+                DistroSpec(
+                    name=DistroName.FEDORA_KDE,
+                    golden_image=tmp_path / "g.qcow2",
+                    domain_overrides=overrides,
+                )
+            ],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        backend = FakeBackend()
+        execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        (domain,) = backend.domains.values()
+        return backend, domain.xml
+
+    def test_overrides_reach_domain_xml(self, tmp_path: Path) -> None:
+        _, xml = self._run(tmp_path, {"memory_mib": 2048, "vcpus": 1})
+        assert '<memory unit="MiB">2048</memory>' in xml
+        assert "<vcpu>1</vcpu>" in xml
+
+    def test_defaults_apply_without_overrides(self, tmp_path: Path) -> None:
+        _, xml = self._run(tmp_path, {})
+        assert '<memory unit="MiB">4096</memory>' in xml
+        assert "<vcpu>2</vcpu>" in xml
+
+    def test_runner_still_owns_name_and_ssh_port(self, tmp_path: Path) -> None:
+        backend, xml = self._run(tmp_path, {"memory_mib": 2048})
+        (name,) = backend.domains
+        assert name.startswith("sw-fedora-kde-")
+        assert f"<name>{name}</name>" in xml
+        assert '<range start="' in xml
+
+    def test_out_of_range_override_fails_before_backend(self, tmp_path: Path) -> None:
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[
+                DistroSpec(
+                    name=DistroName.FEDORA_KDE,
+                    golden_image=tmp_path / "g.qcow2",
+                    domain_overrides={"memory_mib": 100},
+                )
+            ],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        backend = FakeBackend()
+        with pytest.raises(ValidationError):
+            execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        assert backend.calls == []
 
 
 class TestStoreProxyIntegration:

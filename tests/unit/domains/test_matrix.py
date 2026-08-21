@@ -154,3 +154,36 @@ class TestFakeBackend:
         restored_name = b.restore(state)
         assert restored_name == "v1"
         assert b.domains["v1"].started
+
+
+class TestDistroSpec:
+    """`domain_overrides` to jedyne miejsce, gdzie spec mówi o sprzęcie klona.
+
+    Literówka w kluczu albo próba nadania nazwy/portu ma wychodzić przy
+    wczytaniu specu — nie po 60 s bootu, gdy virsh odrzuci XML.
+    """
+
+    def test_overrides_accept_domain_config_fields(self) -> None:
+        spec = DistroSpec(
+            name=DistroName.FEDORA_KDE,
+            golden_image=Path("/tmp/g.qcow2"),
+            domain_overrides={"memory_mib": 2048, "vcpus": 1, "graphics": "spice"},
+        )
+        assert spec.domain_overrides == {"memory_mib": 2048, "vcpus": 1, "graphics": "spice"}
+
+    @pytest.mark.parametrize("key", ["name", "ssh_port"])
+    def test_overrides_reject_runner_owned_fields(self, key: str) -> None:
+        with pytest.raises(ValidationError, match="runner-owned"):
+            DistroSpec(
+                name=DistroName.FEDORA_KDE,
+                golden_image=Path("/tmp/g.qcow2"),
+                domain_overrides={key: "x"},
+            )
+
+    def test_overrides_reject_unknown_key(self) -> None:
+        with pytest.raises(ValidationError, match="memory_mb"):
+            DistroSpec(
+                name=DistroName.FEDORA_KDE,
+                golden_image=Path("/tmp/g.qcow2"),
+                domain_overrides={"memory_mb": 2048},
+            )

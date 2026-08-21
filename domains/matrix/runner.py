@@ -18,7 +18,9 @@ from domains.matrix.backend.fake import FakeBackend, make_unique_name
 from domains.matrix.domain_xml import render_domain_xml
 from domains.matrix.models import (
     _MATRIX_STEP_VERBS,
+    DEFAULT_DOMAIN,
     DistroName,
+    DistroSpec,
     DomainConfig,
     MatrixRunSpec,
     MatrixStep,
@@ -137,10 +139,8 @@ def execute(
         work_root.mkdir(parents=True, exist_ok=True)
 
     for distro in spec.distros:
-        name = make_unique_name(f"sw-{distro.name.value}")
-        domain = _domain_for(distro.name).model_copy(
-            update={"name": name, "ssh_port": pick_ssh_port()}
-        )
+        name = make_unique_name(f"sw-{distro.name.value.replace('.', '-')}")
+        domain = _domain_for(distro, name=name, ssh_port=pick_ssh_port())
         disk_path = _disk_path(work_root if not spec.dry_run else Path("/tmp/dry"), distro.name)
         xml = render_domain_xml(domain, disk_path, cdrom_path=distro.seed_iso)
 
@@ -265,15 +265,16 @@ def _app_verbs_for_run() -> Iterable[_MATRIX_STEP_VERBS]:
     return ("qemu-agent-exec", "screenshot", "verify")
 
 
-def _domain_for(name: DistroName) -> DomainConfig:
+def _domain_for(distro: DistroSpec, *, name: str, ssh_port: int) -> DomainConfig:
+    """Sprzęt klona: `DEFAULT_DOMAIN` nadpisany przez `DistroSpec.domain_overrides`.
+
+    `name` i `ssh_port` zawsze nadaje runner (unikalne per klon); spec nie
+    może ich podmienić — pilnuje tego walidator `DistroSpec`. Budujemy model
+    od zera zamiast `model_copy(update=)`, żeby nadpisania przeszły pełną
+    walidację (`memory_mib` poza zakresem wychodzi tu, nie w virsh).
+    """
     return DomainConfig(
-        name=f"screenwright-{name.value.replace('.', '-')}",
-        memory_mib=4096,
-        vcpus=2,
-        disk_gib=20,
-        graphics="vnc",
-        listen="127.0.0.1",
-        enable_3d=False,
+        **{**DEFAULT_DOMAIN, **distro.domain_overrides, "name": name, "ssh_port": ssh_port}
     )
 
 
