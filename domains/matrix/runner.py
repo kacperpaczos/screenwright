@@ -17,15 +17,16 @@ if TYPE_CHECKING:
     from shared.ports import LibvirtBackend
 
 from domains.matrix.backend.fake import FakeBackend, make_unique_name
+from domains.matrix.backend.ssh import ssh_shell_for
 from domains.matrix.domain_xml import render_domain_xml
 from domains.matrix.guest import (
-    GuestSession,
     GuestWaits,
-    resolve_session,
-    session_command,
+    frame_digest,
+    launch,
     settle_screenshot,
     wait_for_agent,
     wait_for_session,
+    wait_for_shell,
 )
 from domains.matrix.models import (
     _MATRIX_STEP_VERBS,
@@ -43,6 +44,8 @@ if TYPE_CHECKING:
     from shared.types import AppId
 
     from domains.matrix.ports import (
+        GuestShell,
+        GuestShellFactory,
         ReporterSink,
         StoreDriver,
         StoreProxyLifecycle,
@@ -126,6 +129,7 @@ def execute(
     work_root: Path = Path("/tmp/screenwright-matrix"),
     store_proxy_provider: StoreProxyProvider | None = None,
     waits: GuestWaits | None = None,
+    shell_factory: GuestShellFactory | None = None,
 ) -> MatrixReport:
     """Wykonuje przebieg matrycy. W trybie dry_run NIE wywołuje backendu.
 
@@ -139,15 +143,19 @@ def execute(
     po apps i ``stop()`` po (również przy wyjątkach). W ``dry_run`` provider
     nie jest używany — pętla mockuje brak proxy.
 
-    Po ``create`` runner czeka na agenta i na sesję graficzną
-    ``DistroSpec.guest_user`` (``domains.matrix.guest``), komendy drivera
-    odpala w tej sesji, a zrzut robi dopiero, gdy klatki przestają się
-    zmieniać. ``waits`` steruje limitami; ``None`` = ``GuestWaits.default()``.
+    Po ``create`` runner czeka na agenta, na shell w gościu i na sesję
+    graficzną ``DistroSpec.guest_user`` (``domains.matrix.guest``), komendy
+    drivera odpala przez ``GuestShell`` w tej sesji, a zrzut robi dopiero,
+    gdy ekran zmienił się względem klatki sprzed uruchomienia i przestał się
+    zmieniać. ``waits`` steruje limitami (``None`` = ``GuestWaits.default()``);
+    ``shell_factory`` buduje shell per klon (``None`` = SSH przez port passt).
     """
     if backend is None:
         backend = FakeBackend()
     if waits is None:
         waits = GuestWaits.default()
+    if shell_factory is None:
+        shell_factory = ssh_shell_for
     if matcher is None:
         matcher = _build_matcher(spec.verify_threshold)
     started_at = datetime.now(UTC)
@@ -179,28 +187,36 @@ def execute(
                 backend.create(xml, name)
 
         driver = (drivers or {}).get(distro.name)
-        session: GuestSession | None = None
+        shell: GuestShell | None = None
         try:
             if not spec.dry_run:
+                shell = shell_factory(domain, distro)
                 with _timed(timings, distro_label, None, "wait_agent"):
                     wait_for_agent(backend, name, waits=waits)
+                with _timed(timings, distro_label, None, "wait_shell"):
+                    wait_for_shell(shell, waits=waits)
                 with _timed(timings, distro_label, None, "wait_session"):
-                    session = resolve_session(backend, name, distro.guest_user, waits=waits)
-                    wait_for_session(backend, name, session, waits=waits)
+                    wait_for_session(shell, waits=waits)
             for app in spec.apps:
                 actual = (
                     work_root / f"{name}-{app}.png" if not spec.dry_run else Path("/tmp/dry.png")
                 )
                 if not spec.dry_run:
-                    if driver is not None and session is not None:
+                    baseline: str | None = None
+                    if driver is not None and shell is not None:
                         with _timed(timings, distro_label, app, "launch") as detail:
                             commands = driver.commands_for(app)
                             detail["commands"] = len(commands)
-                            _launch(backend, name, session, commands)
+                            if commands:
+                                baseline = frame_digest(backend, name, actual)
+                                launch(shell, commands, waits=waits)
                     with _timed(timings, distro_label, app, "settle") as detail:
-                        settled = settle_screenshot(backend, name, actual, waits=waits)
+                        settled = settle_screenshot(
+                            backend, name, actual, waits=waits, baseline=baseline
+                        )
                         detail["frames"] = settled.frames
                         detail["settled"] = settled.settled
+                        detail["changed"] = settled.changed
                 template = _resolve_template(spec.templates_dir, distro.name, app)
                 with _timed(timings, distro_label, app, "verify"):
                     score = matcher.match(template, actual)
@@ -270,19 +286,6 @@ def _timed(
                 detail={**detail, "ok": ok},
             )
         )
-
-
-def _launch(
-    backend: LibvirtBackend, name: str, session: GuestSession, commands: list[list[str]]
-) -> None:
-    """Komendy drivera w sesji użytkownika: wszystkie poza ostatnią z ``--wait``.
-
-    Ostatnia otwiera stronę aplikacji i zostaje na ekranie — na nią czeka
-    już ``settle_screenshot``, nie ``systemd-run``.
-    """
-    last = len(commands) - 1
-    for index, cmd in enumerate(commands):
-        backend.qemu_agent_exec(name, session_command(cmd, session, wait=index < last))
 
 
 STORE_PROXY_READY_TIMEOUT = 20.0

@@ -46,23 +46,40 @@ _DEFAULT_PNG = (
 )
 
 
+class FakeScreen:
+    """Ekran gościa w pamięci: `generation` rośnie, gdy „coś się narysowało".
+
+    Klatka to `_DEFAULT_PNG` z numerem generacji wpisanym za IEND — dla
+    `settle_screenshot` liczy się tylko skrót, więc to wystarczy.
+    """
+
+    def __init__(self) -> None:
+        self.generation = 0
+
+    def bump(self) -> None:
+        self.generation += 1
+
+    def frame(self) -> bytes:
+        return _DEFAULT_PNG + self.generation.to_bytes(4, "big")
+
+
 class FakeBackend:
     """In-memory backend symulujący virsh.
 
     - `calls` to lista wszystkich wywołań (asercja w testach).
-    - `screenshot_bytes` to zawartość zwracana przez screenshot() (PNG 1x1).
+    - `screenshot_bytes` wymusza jedną, stałą klatkę zwracaną przez screenshot();
+      domyślnie klatka pochodzi z `screen` (`FakeScreen`) — ten sam obiekt
+      podany do `FakeShell` sprawia, że odczepione uruchomienie sklepu zmienia
+      ekran, jak na żywo, i `settle_screenshot` ma się na czym ustabilizować.
     - `agent_output` to dict komenda -> stdout (domyślnie "").
     - `raise_on` to set nazw metod, które rzucają RuntimeError (symulacja błędu).
-    - `raise_on_command` to set tokenów argv: `qemu_agent_exec` z komendą
-      zawierającą którykolwiek rzuca RuntimeError (padł konkretny program w
-      gościu, nie cały agent).
     - `agent_fail_first` — tyle pierwszych wywołań `qemu_agent_exec` rzuca
       (agent jeszcze nie wstał); próby są zapisywane w `calls`, żeby test mógł
       policzyć retry.
-    - Fake udaje zbootowanego gościa: bez wpisu w `agent_output` probe
-      `systemctl --user is-active …` odpowiada `active`, a `id -u <user>` — `1000`.
     - `create_overlay` tworzy pusty plik w `overlay`, żeby dalszy kod mógł
       sprawdzić cleanup tak samo jak na produkcji.
+
+    Komendy w sesji użytkownika symuluje osobno `FakeShell` (port `GuestShell`).
     """
 
     def __init__(
@@ -71,13 +88,13 @@ class FakeBackend:
         screenshot_bytes: bytes | None = None,
         agent_output: dict[str, str] | None = None,
         raise_on: set[str] | None = None,
-        raise_on_command: set[str] | None = None,
         agent_fail_first: int = 0,
+        screen: FakeScreen | None = None,
     ) -> None:
-        self._screenshot_bytes = screenshot_bytes if screenshot_bytes is not None else _DEFAULT_PNG
+        self._screenshot_bytes = screenshot_bytes
+        self.screen = screen if screen is not None else FakeScreen()
         self._agent_output = agent_output or {}
         self._raise_on = raise_on or set()
-        self._raise_on_command = raise_on_command or set()
         self._agent_failures_left = agent_fail_first
         self._domains: dict[str, DomainState] = {}
         self._overlays: dict[Path, OverlayState] = {}
@@ -151,8 +168,10 @@ class FakeBackend:
     def screenshot(self, name: str, out_path: Path) -> Path:
         self._record("screenshot", name, out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        if not out_path.exists():
-            out_path.write_bytes(self._screenshot_bytes)
+        frame = (
+            self._screenshot_bytes if self._screenshot_bytes is not None else self.screen.frame()
+        )
+        out_path.write_bytes(frame)
         return out_path
 
     def domifaddr(self, name: str) -> str:
@@ -164,16 +183,63 @@ class FakeBackend:
         if self._agent_failures_left > 0:
             self._agent_failures_left -= 1
             raise RuntimeError(f"guest-exec on {name} failed: Guest agent is not responding")
-        if self._raise_on_command & set(command):
-            raise RuntimeError(f"guest-exec failed (exitcode=127) on {name}: {' '.join(command)}")
         key = " ".join(command)
-        if key in self._agent_output:
-            return self._agent_output[key]
+        return self._agent_output.get(key, "")
+
+
+class FakeShell:
+    """In-memory `GuestShell` — udaje SSH do zbootowanego gościa.
+
+    - `calls` — lista wykonanych argv (asercje w testach).
+    - `output` — dict `" ".join(argv)` → stdout; bez wpisu probe
+      `systemctl --user is-active …` odpowiada `active`, reszta pustym stringiem.
+    - `fail_first` — tyle pierwszych `run()` rzuca (sshd/passt jeszcze nie wstały).
+    - `raise_on_command` — tokeny argv, przy których `run()` rzuca (padł
+      konkretny program, np. brak binarki sklepu).
+    - `screen` — ten sam `FakeScreen`, co w `FakeBackend`: odczepione
+      uruchomienie (`systemd-run` bez `--wait`) podbija generację ekranu, więc
+      kolejny zrzut różni się od klatki sprzed startu — jak na żywo.
+    """
+
+    def __init__(
+        self,
+        *,
+        output: dict[str, str] | None = None,
+        fail_first: int = 0,
+        raise_on_command: set[str] | None = None,
+        screen: FakeScreen | None = None,
+    ) -> None:
+        self._output = output or {}
+        self._failures_left = fail_first
+        self._raise_on_command = raise_on_command or set()
+        self._screen = screen
+        self.calls: list[list[str]] = []
+
+    def run(self, command: list[str], timeout: float = 30.0) -> str:
+        self.calls.append(list(command))
+        if self._failures_left > 0:
+            self._failures_left -= 1
+            raise RuntimeError("ssh: connect to host 127.0.0.1: Connection refused")
+        if self._raise_on_command & set(command):
+            raise RuntimeError(f"ssh command failed (exit=127): {' '.join(command)}")
+        if self._screen is not None and command[:1] == ["systemd-run"] and "--wait" not in command:
+            self._screen.bump()
+        key = " ".join(command)
+        if key in self._output:
+            return self._output[key]
         if "is-active" in command:
-            return "active"
-        if command[:2] == ["id", "-u"]:
-            return "1000"
+            return "active\n"
         return ""
+
+
+def fake_shell_factory(shell: FakeShell | None = None, *, screen: FakeScreen | None = None) -> Any:
+    """Fabryka `GuestShell` dla testów: zawsze ten sam `FakeShell` (albo świeży na `screen`)."""
+    instance = shell if shell is not None else FakeShell(screen=screen)
+
+    def factory(domain: Any, distro: Any) -> FakeShell:
+        return instance
+
+    return factory
 
 
 def compute_screenshot_hash(payload: bytes) -> Sha256:
@@ -186,4 +252,12 @@ def make_unique_name(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:6]}"
 
 
-__all__ = ["FakeBackend", "FakeCall", "compute_screenshot_hash", "make_unique_name"]
+__all__ = [
+    "FakeBackend",
+    "FakeCall",
+    "FakeScreen",
+    "FakeShell",
+    "compute_screenshot_hash",
+    "fake_shell_factory",
+    "make_unique_name",
+]

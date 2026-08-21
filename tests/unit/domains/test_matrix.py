@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from domains.matrix.backend.fake import FakeBackend
+from domains.matrix.backend.fake import FakeBackend, FakeScreen, FakeShell, fake_shell_factory
 from domains.matrix.models import (
     DistroName,
     DistroSpec,
@@ -152,7 +152,7 @@ class TestFakeBackend:
         assert b.domains["v1"].saved
         b.destroy("v1")
         assert b.restored_name(state) == "v1"
-        assert b.restore(state) is None  # port: restore() -> None, jak VirshBackend
+        b.restore(state)
         assert b.domains["v1"].started
 
     def test_restore_records_xml_override(self, tmp_path: Path) -> None:
@@ -223,21 +223,66 @@ class TestFakeBackendGuestSimulation:
         assert b.qemu_agent_exec("v1", ["true"]) == ""
         assert len([c for c in b.calls if c.method == "qemu_agent_exec"]) == 3
 
-    def test_raise_on_command_hits_only_matching_argv(self) -> None:
-        b = FakeBackend(raise_on_command={"broken-store-command"})
-        assert b.qemu_agent_exec("v1", ["true"]) == ""
-        with pytest.raises(RuntimeError, match="exitcode=127"):
-            b.qemu_agent_exec("v1", ["systemd-run", "--", "broken-store-command"])
-
-    def test_default_probe_answers_simulate_booted_guest(self) -> None:
-        b = FakeBackend()
-        assert b.qemu_agent_exec("v1", ["id", "-u", "test"]) == "1000"
-        assert b.qemu_agent_exec("v1", ["systemctl", "--user", "is-active", "x.target"]) == "active"
+    def test_agent_output_is_keyed_by_joined_argv(self) -> None:
+        b = FakeBackend(agent_output={"id -u test": "42"})
+        assert b.qemu_agent_exec("v1", ["id", "-u", "test"]) == "42"
         assert b.qemu_agent_exec("v1", ["anything-else"]) == ""
 
-    def test_agent_output_overrides_defaults(self) -> None:
-        b = FakeBackend(
-            agent_output={"id -u test": "42", "systemctl --user is-active x": "inactive"}
-        )
-        assert b.qemu_agent_exec("v1", ["id", "-u", "test"]) == "42"
-        assert b.qemu_agent_exec("v1", ["systemctl", "--user", "is-active", "x"]) == "inactive"
+    def test_screenshot_follows_shared_screen(self, tmp_path: Path) -> None:
+        screen = FakeScreen()
+        b = FakeBackend(screen=screen)
+        out = tmp_path / "s.png"
+        b.screenshot("v1", out)
+        first = out.read_bytes()
+        b.screenshot("v1", out)
+        assert out.read_bytes() == first
+        screen.bump()
+        b.screenshot("v1", out)
+        assert out.read_bytes() != first
+
+    def test_screenshot_bytes_override_is_constant(self, tmp_path: Path) -> None:
+        b = FakeBackend(screenshot_bytes=b"png")
+        out = tmp_path / "s.png"
+        b.screenshot("v1", out)
+        b.screen.bump()
+        b.screenshot("v1", out)
+        assert out.read_bytes() == b"png"
+
+
+class TestFakeShell:
+    def test_records_calls_and_answers_is_active(self) -> None:
+        sh = FakeShell()
+        assert sh.run(["systemctl", "--user", "is-active", "x.target"]).strip() == "active"
+        assert sh.run(["anything"]) == ""
+        assert sh.calls == [["systemctl", "--user", "is-active", "x.target"], ["anything"]]
+
+    def test_output_overrides_defaults(self) -> None:
+        sh = FakeShell(output={"systemctl --user is-active x": "inactive"})
+        assert sh.run(["systemctl", "--user", "is-active", "x"]) == "inactive"
+
+    def test_fail_first_then_ok(self) -> None:
+        sh = FakeShell(fail_first=1)
+        with pytest.raises(RuntimeError, match="refused"):
+            sh.run(["true"])
+        assert sh.run(["true"]) == ""
+
+    def test_raise_on_command_hits_only_matching_argv(self) -> None:
+        sh = FakeShell(raise_on_command={"broken-store-command"})
+        assert sh.run(["true"]) == ""
+        with pytest.raises(RuntimeError, match="exit=127"):
+            sh.run(["systemd-run", "--", "broken-store-command"])
+
+    def test_detached_systemd_run_bumps_shared_screen(self) -> None:
+        screen = FakeScreen()
+        sh = FakeShell(screen=screen)
+        sh.run(["systemd-run", "--user", "--wait", "--", "store", "--quit"])
+        assert screen.generation == 0
+        sh.run(["systemd-run", "--user", "--", "store", "--details=x"])
+        assert screen.generation == 1
+
+    def test_factory_returns_same_shell(self) -> None:
+        sh = FakeShell()
+        factory = fake_shell_factory(sh)
+        assert factory(None, None) is sh
+        fresh = fake_shell_factory(screen=FakeScreen())
+        assert fresh(None, None) is fresh(None, None)

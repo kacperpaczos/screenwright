@@ -36,12 +36,12 @@ class VerificationResult(BaseModel):
         return self
 
 
-_BOOT_PHASES = ("create", "wait_agent", "wait_session", "warm_restore")
+_BOOT_PHASES = ("create", "wait_agent", "wait_shell", "wait_session", "warm_restore")
 """Fazy składające się na „boot" w `MatrixReport.phase_totals()`.
 
 `create` to zimny start domeny, `warm_restore` — przywrócenie ze stanu; po obu
-następuje czekanie na agenta i sesję. Suma daje czas od „chcę maszynę" do
-„mogę w niej klikać" niezależnie od ścieżki.
+następuje czekanie na agenta, na shell (SSH) i na sesję. Suma daje czas od
+„chcę maszynę" do „mogę w niej klikać" niezależnie od ścieżki.
 """
 
 

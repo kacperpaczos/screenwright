@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
     from shared.types import AppId
 
-    from domains.matrix.models import DistroName, DistroSpec
+    from domains.matrix.models import DistroName, DistroSpec, DomainConfig
 
 
 @runtime_checkable
@@ -31,6 +31,28 @@ class StoreDriver(Protocol):
     def commands_for(self, app: AppId) -> list[list[str]]:
         """Lista komend do wykonania przez qemu-guest-agent."""
         ...
+
+
+@runtime_checkable
+class GuestShell(Protocol):
+    """Wykonuje komendę w gościu **jako użytkownik sesji graficznej**.
+
+    Zwraca stdout; niezerowy kod wyjścia to ``RuntimeError`` ze stderr w
+    treści. Na żywo to SSH przez przekierowany port passt (``SshShell``) —
+    ``qemu-guest-agent`` działa jako root w domenie SELinux
+    ``virt_qemu_ga_t``, która nie może ani zmienić użytkownika (``runuser``,
+    ``setpriv``), ani zagadać do systemd (``systemd-run``), więc z agenta nie
+    da się trafić do sesji użytkownika (sprawdzone na Fedorze 44, 2026-08-22).
+    """
+
+    def run(self, command: list[str], timeout: float = 30.0) -> str: ...
+
+
+@runtime_checkable
+class GuestShellFactory(Protocol):
+    """Buduje ``GuestShell`` dla konkretnego klona (port SSH z ``DomainConfig``, użytkownik z ``DistroSpec``)."""
+
+    def __call__(self, domain: DomainConfig, distro: DistroSpec) -> GuestShell: ...
 
 
 @runtime_checkable
@@ -65,6 +87,8 @@ class StoreProxyProvider(Protocol):
 
 __all__ = [
     "DistroBuilder",
+    "GuestShell",
+    "GuestShellFactory",
     "ReporterSink",
     "StoreDriver",
     "StoreProxyLifecycle",

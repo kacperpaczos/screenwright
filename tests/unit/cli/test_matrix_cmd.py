@@ -11,10 +11,12 @@ from cli.matrix_cmd import (
     _drivers_for_spec,
     _load_spec,
     _make_backend,
+    _make_shell_factory,
     run_matrix_execute,
     run_matrix_plan,
 )
-from domains.matrix.backend.fake import FakeBackend
+from domains.matrix.backend.fake import FakeBackend, FakeShell
+from domains.matrix.backend.ssh import ssh_shell_for
 from domains.matrix.backend.virsh import VirshBackend
 from domains.matrix.drivers.ubuntu import UbuntuDriver
 from domains.matrix.models import DistroName
@@ -98,6 +100,16 @@ class TestMakeBackend:
     def test_unknown_raises(self) -> None:
         with pytest.raises(ValueError, match="unknown backend"):
             _make_backend(argparse.Namespace(backend="podman"))
+
+    def test_fake_backend_gets_fake_shell_on_the_same_screen(self) -> None:
+        backend = FakeBackend()
+        shell = _make_shell_factory(backend)(None, None)  # type: ignore[arg-type]
+        assert isinstance(shell, FakeShell)
+        shell.run(["systemd-run", "--user", "--", "store"])
+        assert backend.screen.generation == 1
+
+    def test_virsh_backend_gets_ssh_shell_factory(self) -> None:
+        assert _make_shell_factory(VirshBackend()) is ssh_shell_for
 
 
 class TestDriversForSpec:

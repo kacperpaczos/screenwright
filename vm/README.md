@@ -166,13 +166,21 @@ Co robi runner per dystrybucja (`domains/matrix/runner.py` +
 `domains/matrix/guest.py`):
 
 1. overlay na golden → `virsh create` (domena transient),
-2. czeka, aż `qemu-guest-agent` odpowiada, potem aż `graphical-session.target`
+2. czeka, aż `qemu-guest-agent` odpowiada, potem aż SSH do gościa działa
+   (`ssh -p <port> test@127.0.0.1`, klucz `SCREENWRIGHT_SSH_KEY` /
+   `~/.ssh/screenwright_ubuntu`), potem aż `graphical-session.target`
    użytkownika `test` (`DistroSpec.guest_user`) jest `active`,
-3. komendy drivera sklepu odpala **w tej sesji**: `runuser -u test -- env
-   XDG_RUNTIME_DIR=/run/user/<uid> … systemd-run --user …` — agent działa jako
-   root bez `DISPLAY`, więc bez tego GUI nie ma się gdzie narysować,
-4. robi `virsh screenshot`, dopóki dwie kolejne klatki nie są identyczne
-   (albo mija limit), i dopiero ten zrzut porównuje,
+3. komendy drivera sklepu odpala **przez SSH, w sesji użytkownika**:
+   `systemd-run --user --collect --quiet [--wait] -- <komenda>` — proces ląduje
+   w managerze użytkownika, gdzie GNOME/Plasma trzymają `DISPLAY`,
+   `WAYLAND_DISPLAY` i szynę sesji. Agent **nie** nadaje się do tego: działa
+   jako root w domenie SELinux `virt_qemu_ga_t`, która nie może ani zmienić
+   użytkownika (`runuser`/`setpriv` → „Operation not permitted"), ani zagadać
+   do systemd (`systemd-run` → „Access denied") — sprawdzone na Fedorze 44,
+4. robi `virsh screenshot`, dopóki ekran nie **zmieni się względem klatki sprzed
+   uruchomienia** i dwie kolejne klatki nie są identyczne (albo mija limit;
+   zimny start GNOME Software potrafi rysować okno dopiero po ~45 s), i dopiero
+   ten zrzut porównuje,
 5. `virsh destroy` + usunięcie overlaya, także po błędzie.
 
 Każda faza ląduje w raporcie jako `timings[]` (`PhaseTiming`), a CLI wypisuje

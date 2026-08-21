@@ -1,4 +1,4 @@
-"""Testy jednostkowe — domains.matrix.guest: gotowość gościa, sesja, settle."""
+"""Testy jednostkowe — domains.matrix.guest: gotowość gościa, shell sesji, settle."""
 
 from __future__ import annotations
 
@@ -6,19 +6,18 @@ import time
 from pathlib import Path  # noqa: TC003  (tmp_path / fixtures at runtime)
 
 import pytest
-from domains.matrix.backend.fake import FakeBackend
+from domains.matrix.backend.fake import FakeBackend, FakeScreen, FakeShell
 from domains.matrix.guest import (
-    GuestSession,
+    SESSION_PROBE,
     GuestWaits,
-    resolve_session,
+    frame_digest,
+    launch,
     session_command,
-    session_probe,
     settle_screenshot,
     wait_for_agent,
     wait_for_session,
+    wait_for_shell,
 )
-
-_SESSION = GuestSession(user="test", uid=1000)
 
 
 def _agent_calls(backend: FakeBackend) -> list[list[str]]:
@@ -63,57 +62,40 @@ class TestWaitForAgent:
         assert len(_agent_calls(backend)) == 6
 
 
-class TestResolveSession:
-    def test_reads_uid_from_guest(self) -> None:
-        backend = FakeBackend(agent_output={"id -u kacper": "1001\n"})
-        session = resolve_session(backend, "vm", "kacper", waits=GuestWaits.instant())
-        assert session == GuestSession(user="kacper", uid=1001)
-        assert session.runtime_dir == "/run/user/1001"
+class TestWaitForShell:
+    def test_retries_until_ssh_answers(self) -> None:
+        shell = FakeShell(fail_first=2)
+        wait_for_shell(shell, waits=GuestWaits.instant())
+        assert shell.calls == [["true"]] * 3
 
-    def test_fake_defaults_to_uid_1000(self) -> None:
-        session = resolve_session(FakeBackend(), "vm", "test", waits=GuestWaits.instant())
-        assert session.uid == 1000
-
-    def test_garbage_uid_is_an_error(self) -> None:
-        backend = FakeBackend(agent_output={"id -u test": "id: 'test': no such user"})
-        with pytest.raises(RuntimeError, match="cannot resolve uid"):
-            resolve_session(backend, "vm", "test", waits=GuestWaits.instant())
+    def test_times_out(self) -> None:
+        shell = FakeShell(fail_first=10**6)
+        waits = GuestWaits.instant(shell_timeout=4.0, probe_interval=1.0)
+        with pytest.raises(TimeoutError, match=r"guest shell did not answer within 4s.*refused"):
+            wait_for_shell(shell, waits=waits)
 
 
 class TestWaitForSession:
-    def test_probe_runs_systemctl_as_the_user(self) -> None:
-        probe = session_probe(_SESSION)
-        assert probe[:4] == ["runuser", "-u", "test", "--"]
-        assert "XDG_RUNTIME_DIR=/run/user/1000" in probe
-        assert probe[-4:] == ["systemctl", "--user", "is-active", "graphical-session.target"]
+    def test_probe_is_systemctl_user_is_active(self) -> None:
+        assert SESSION_PROBE == ["systemctl", "--user", "is-active", "graphical-session.target"]
 
     def test_nonzero_exit_then_active(self) -> None:
-        # systemctl is-active kończy się kodem 3 (→ RuntimeError z backendu), dopóki target nie wstanie.
-        backend = FakeBackend(agent_fail_first=2)
-        wait_for_session(backend, "vm", _SESSION, waits=GuestWaits.instant())
-        assert len(_agent_calls(backend)) == 3
+        # systemctl is-active kończy się kodem 3 (→ RuntimeError z shella), dopóki target nie wstanie.
+        shell = FakeShell(fail_first=2)
+        wait_for_session(shell, waits=GuestWaits.instant())
+        assert shell.calls == [SESSION_PROBE] * 3
 
     def test_inactive_answer_keeps_polling_then_times_out(self) -> None:
-        key = " ".join(session_probe(_SESSION))
-        backend = FakeBackend(agent_output={key: "inactive\n"})
+        shell = FakeShell(output={" ".join(SESSION_PROBE): "inactive\n"})
         waits = GuestWaits.instant(session_timeout=3.0, probe_interval=1.0)
         with pytest.raises(TimeoutError, match=r"not active after 3s.*'inactive'"):
-            wait_for_session(backend, "vm", _SESSION, waits=waits)
+            wait_for_session(shell, waits=waits)
 
 
 class TestSessionCommand:
-    def test_wraps_argv_with_runuser_env_and_systemd_run(self) -> None:
-        cmd = session_command(
-            ["plasma-discover", "--application=appstream:x"], _SESSION, wait=False
-        )
+    def test_wraps_argv_in_detached_user_unit(self) -> None:
+        cmd = session_command(["plasma-discover", "--application=appstream:x"], wait=False)
         assert cmd == [
-            "runuser",
-            "-u",
-            "test",
-            "--",
-            "env",
-            "XDG_RUNTIME_DIR=/run/user/1000",
-            "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
             "systemd-run",
             "--user",
             "--collect",
@@ -124,15 +106,40 @@ class TestSessionCommand:
         ]
 
     def test_wait_flag_blocks_until_exit(self) -> None:
-        cmd = session_command(["gnome-software", "--quit"], _SESSION, wait=True)
-        assert "--wait" in cmd
-        assert cmd.index("--wait") < cmd.index("--", 4)
-        assert cmd[-2:] == ["gnome-software", "--quit"]
+        cmd = session_command(["gnome-software", "--quit"], wait=True)
+        assert cmd == [
+            "systemd-run",
+            "--user",
+            "--collect",
+            "--quiet",
+            "--wait",
+            "--",
+            "gnome-software",
+            "--quit",
+        ]
 
-    def test_other_user_and_uid(self) -> None:
-        cmd = session_command(["true"], GuestSession(user="kacper", uid=1234), wait=False)
-        assert cmd[2] == "kacper"
-        assert "XDG_RUNTIME_DIR=/run/user/1234" in cmd
+
+class TestLaunch:
+    def test_all_but_last_command_wait(self) -> None:
+        shell = FakeShell()
+        launch(
+            shell,
+            [["store", "--quit"], ["store", "--refresh"], ["store", "--details=x"]],
+            waits=GuestWaits.instant(),
+        )
+        assert ["--wait" in c for c in shell.calls] == [True, True, False]
+        assert [c[-1] for c in shell.calls] == ["--quit", "--refresh", "--details=x"]
+
+    def test_failing_command_propagates(self) -> None:
+        shell = FakeShell(raise_on_command={"broken-store"})
+        with pytest.raises(RuntimeError, match="exit=127"):
+            launch(shell, [["broken-store"]], waits=GuestWaits.instant())
+
+    def test_detached_launch_changes_shared_screen(self) -> None:
+        screen = FakeScreen()
+        shell = FakeShell(screen=screen)
+        launch(shell, [["store", "--quit"], ["store", "--details=x"]], waits=GuestWaits.instant())
+        assert screen.generation == 1  # tylko odczepiona komenda „rysuje"
 
 
 class TestSettleScreenshot:
@@ -146,6 +153,7 @@ class TestSettleScreenshot:
             waits=GuestWaits.instant(settle_min_wait=0.0, stable_frames=2, settle_interval=1.0),
         )
         assert info.settled is True
+        assert info.changed is True  # bez punktu odniesienia każda klatka „się zmieniła"
         assert info.frames == 2
         assert out.exists()
         assert len([c for c in backend.calls if c.method == "screenshot"]) == 2
@@ -156,6 +164,29 @@ class TestSettleScreenshot:
         assert info.settled is True
         assert info.elapsed >= 3.0
         assert info.frames == 4
+
+    def test_unchanged_screen_is_not_settled(self, tmp_path: Path) -> None:
+        """Stabilny pulpit ≠ wyrenderowany sklep: bez zmiany względem baseline czekamy do limitu."""
+        backend = FakeBackend()
+        out = tmp_path / "shot.png"
+        baseline = frame_digest(backend, "vm", out)
+        waits = GuestWaits.instant(settle_min_wait=0.0, settle_timeout=5.0, settle_interval=1.0)
+        info = settle_screenshot(backend, "vm", out, waits=waits, baseline=baseline)
+        assert info.settled is False
+        assert info.changed is False
+        assert info.frames == 6
+
+    def test_settles_once_screen_changed_and_holds(self, tmp_path: Path) -> None:
+        screen = FakeScreen()
+        backend = FakeBackend(screen=screen)
+        out = tmp_path / "shot.png"
+        baseline = frame_digest(backend, "vm", out)
+        screen.bump()  # sklep się narysował
+        waits = GuestWaits.instant(settle_min_wait=0.0, stable_frames=2, settle_interval=1.0)
+        info = settle_screenshot(backend, "vm", out, waits=waits, baseline=baseline)
+        assert info.settled is True
+        assert info.changed is True
+        assert info.frames == 2
 
     def test_changing_frames_time_out_unsettled(self, tmp_path: Path) -> None:
         class _Flicker(FakeBackend):
@@ -171,5 +202,6 @@ class TestSettleScreenshot:
         waits = GuestWaits.instant(settle_min_wait=0.0, settle_timeout=5.0, settle_interval=1.0)
         info = settle_screenshot(_Flicker(), "vm", tmp_path / "shot.png", waits=waits)
         assert info.settled is False
+        assert info.changed is True
         assert info.frames == 6
         assert (tmp_path / "shot.png").read_bytes() == b"frame-6"

@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from domains.matrix.backend.fake import FakeBackend
+from domains.matrix.backend.fake import FakeBackend, fake_shell_factory
+from domains.matrix.backend.ssh import ssh_shell_for
 from domains.matrix.backend.virsh import VirshBackend
 from domains.matrix.drivers import (
     AppCenterDriver,
@@ -16,7 +17,12 @@ from domains.matrix.drivers import (
     UbuntuDriver,
 )
 from domains.matrix.models import DistroName, DistroSpec, MatrixRunSpec
-from domains.matrix.ports import StoreDriver, StoreProxyLifecycle, StoreProxyProvider
+from domains.matrix.ports import (
+    GuestShellFactory,
+    StoreDriver,
+    StoreProxyLifecycle,
+    StoreProxyProvider,
+)
 from domains.matrix.runner import (
     TemplateMatcherPort,
 )
@@ -98,6 +104,13 @@ def _make_backend(args: argparse.Namespace) -> LibvirtBackend:
     raise ValueError(f"unknown backend: {name}")
 
 
+def _make_shell_factory(backend: LibvirtBackend) -> GuestShellFactory:
+    """Shell w gościu pasujący do backendu: fake → in-memory na tym samym ekranie, virsh → SSH."""
+    if isinstance(backend, FakeBackend):
+        return fake_shell_factory(screen=backend.screen)
+    return ssh_shell_for
+
+
 def _make_matcher(threshold: float) -> TemplateMatcherPort:
     """Wybiera matcher: OpenCV jeśli dostępny, inaczej Identity."""
     try:
@@ -141,6 +154,7 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
             )
             return 2
         backend: LibvirtBackend = _make_backend(args)
+        shell_factory = _make_shell_factory(backend)
         matcher: TemplateMatcherPort = _make_matcher(spec.verify_threshold)
         drivers = _drivers_for_spec(spec)
         provider = _make_store_proxy_provider(args)
@@ -163,6 +177,7 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
         matcher=matcher,
         drivers=drivers,
         store_proxy_provider=provider,
+        shell_factory=shell_factory,
     )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -13,6 +13,9 @@ from pathlib import Path
 
 DEFAULT_PUBKEY = Path.home() / ".ssh" / "screenwright_ubuntu.pub"
 ENV_VAR = "SCREENWRIGHT_SSH_PUBKEY_PATH"
+DEFAULT_PRIVKEY = Path.home() / ".ssh" / "screenwright_ubuntu"
+PRIVKEY_ENV_VAR = "SCREENWRIGHT_SSH_KEY"
+"""Ta sama zmienna, której używa ``vm/scripts/ubuntu-ssh.sh`` — jedna konwencja dla skryptów i runnera."""
 
 
 def resolve_pubkey_path(explicit: Path | None = None) -> Path | None:
@@ -27,6 +30,21 @@ def resolve_pubkey_path(explicit: Path | None = None) -> Path | None:
     return None
 
 
+def resolve_private_key_path(explicit: Path | None = None) -> Path:
+    """Klucz prywatny do SSH w gościu: jawny → ``SCREENWRIGHT_SSH_KEY`` → domyślny.
+
+    W odróżnieniu od klucza publicznego brak pliku jest tu błędem dopiero przy
+    użyciu (``SshShell``), nie przy wczytaniu — runner w ``dry_run`` nie
+    potrzebuje klucza.
+    """
+    if explicit is not None:
+        return explicit
+    env = os.environ.get(PRIVKEY_ENV_VAR)
+    if env:
+        return Path(env)
+    return DEFAULT_PRIVKEY
+
+
 def load_pubkey(path: Path | None) -> str:
     """Treść klucza publicznego; pusty string, gdy pliku nie ma.
 
@@ -39,4 +57,12 @@ def load_pubkey(path: Path | None) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-__all__ = ["DEFAULT_PUBKEY", "ENV_VAR", "load_pubkey", "resolve_pubkey_path"]
+__all__ = [
+    "DEFAULT_PRIVKEY",
+    "DEFAULT_PUBKEY",
+    "ENV_VAR",
+    "PRIVKEY_ENV_VAR",
+    "load_pubkey",
+    "resolve_private_key_path",
+    "resolve_pubkey_path",
+]

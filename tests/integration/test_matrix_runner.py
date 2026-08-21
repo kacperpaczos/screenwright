@@ -4,10 +4,10 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from domains.matrix.backend.fake import FakeBackend
+from domains.matrix.backend.fake import FakeBackend, FakeScreen, FakeShell, fake_shell_factory
 from domains.matrix.drivers import DiscoverDriver
-from domains.matrix.guest import GuestWaits
-from domains.matrix.models import DistroName, DistroSpec, MatrixRunSpec
+from domains.matrix.guest import SESSION_PROBE, GuestWaits
+from domains.matrix.models import DistroName, DistroSpec, DomainConfig, MatrixRunSpec
 from domains.matrix.runner import _default_matcher, _teardown, _timed, execute, plan
 from pydantic import ValidationError
 from shared.results import PhaseTiming
@@ -41,7 +41,13 @@ class TestMatrixRunner:
             output_dir=tmp_path,
         )
         backend = FakeBackend()
-        report = execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        report = execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
+        )
         assert len(report.results) == 1
         methods = [c.method for c in backend.calls]
         assert "create_overlay" in methods
@@ -61,7 +67,13 @@ class TestMatrixRunner:
             output_dir=tmp_path,
         )
         backend = FakeBackend()
-        execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
+        )
 
         # Zbierz nazwy z create i ze screenshot/destroy.
         create_names = {c.args[1] for c in backend.calls if c.method == "create"}
@@ -82,7 +94,13 @@ class TestMatrixRunner:
             output_dir=tmp_path,
         )
         backend = FakeBackend()
-        execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
+        )
         overlay_calls = [c for c in backend.calls if c.method == "create_overlay"]
         assert len(overlay_calls) == 1
         assert overlay_calls[0].args[0] == golden
@@ -96,7 +114,13 @@ class TestMatrixRunner:
             output_dir=tmp_path,
         )
         backend = FakeBackend()
-        report = execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        report = execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
+        )
         assert len(report.results) == 2
         creates = [c for c in backend.calls if c.method == "create"]
         destroys = [c for c in backend.calls if c.method == "destroy"]
@@ -129,6 +153,7 @@ class TestMatrixRunner:
             matcher=_default_matcher(),
             drivers={DistroName.FEDORA_KDE: driver},
             work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
         )
         assert driver.calls == ["org.kde.kcalc", "org.gimp.GIMP"]
 
@@ -141,12 +166,17 @@ class TestMatrixRunner:
             output_dir=tmp_path,
         )
         backend = FakeBackend()
-        # Brak drivera = brak komend sklepu; agent jest używany tylko do sprawdzenia gotowości.
-        report = execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        shell = FakeShell()
+        # Brak drivera = brak komend sklepu; shell służy tylko do sprawdzenia gotowości.
+        report = execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(shell),
+        )
         assert len(report.results) == 1
-        launched = [c.args[1] for c in backend.calls if c.method == "qemu_agent_exec"]
-        assert launched, "gotowość gościa ma być sprawdzona przez agenta"
-        assert not any("systemd-run" in cmd for cmd in launched)
+        assert shell.calls == [["true"], SESSION_PROBE]
 
     def test_driver_failure_still_destroys_domain(self, tmp_path: Path) -> None:
         """Wyjątek z qemu_agent_exec nie może zostawić działającej VM.
@@ -165,7 +195,8 @@ class TestMatrixRunner:
             dry_run=False,
             output_dir=tmp_path,
         )
-        backend = FakeBackend(raise_on_command={"broken-store-command"})
+        backend = FakeBackend()
+        shell = FakeShell(raise_on_command={"broken-store-command"})
         with pytest.raises(RuntimeError):
             execute(
                 spec,
@@ -173,6 +204,7 @@ class TestMatrixRunner:
                 matcher=_default_matcher(),
                 drivers={DistroName.FEDORA_KDE: _FailingDriver()},  # type: ignore[dict-item]
                 work_root=tmp_path,
+                shell_factory=fake_shell_factory(shell),
             )
         assert "destroy" in {c.method for c in backend.calls}
 
@@ -187,7 +219,8 @@ class TestMatrixRunner:
             dry_run=False,
             output_dir=tmp_path,
         )
-        backend = FakeBackend(raise_on_command={"broken-store-command"})
+        backend = FakeBackend()
+        shell = FakeShell(raise_on_command={"broken-store-command"})
         with pytest.raises(RuntimeError):
             execute(
                 spec,
@@ -195,6 +228,7 @@ class TestMatrixRunner:
                 matcher=_default_matcher(),
                 drivers={DistroName.FEDORA_KDE: _FailingDriver()},  # type: ignore[dict-item]
                 work_root=tmp_path,
+                shell_factory=fake_shell_factory(shell),
             )
         leftovers = list(tmp_path.glob("*.qcow2"))
         assert leftovers == []
@@ -212,7 +246,8 @@ class TestMatrixRunner:
             def commands_for(self, app: str) -> list[list[str]]:
                 return [["broken-store-command"]]
 
-        backend = FakeBackend(raise_on={"destroy"}, raise_on_command={"broken-store-command"})
+        backend = FakeBackend(raise_on={"destroy"})
+        shell = FakeShell(raise_on_command={"broken-store-command"})
         with pytest.raises(RuntimeError):
             execute(
                 spec,
@@ -220,6 +255,7 @@ class TestMatrixRunner:
                 matcher=_default_matcher(),
                 drivers={DistroName.FEDORA_KDE: _FailingDriver()},  # type: ignore[dict-item]
                 work_root=tmp_path,
+                shell_factory=fake_shell_factory(shell),
             )
 
     def test_plan_with_multiple_distros(self) -> None:
@@ -274,7 +310,8 @@ class TestMatrixRunner:
             spec,
             backend=backend,
             matcher=_Capture(),
-            work_root=tmp_path,  # type: ignore[arg-type]
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(),  # type: ignore[arg-type]
         )
         assert "paths" in received
         template_path, actual_path = received["paths"]
@@ -338,7 +375,13 @@ class TestSeedIsoAttachment:
             output_dir=tmp_path,
         )
         backend = FakeBackend()
-        execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
+        )
         (domain,) = backend.domains.values()
         return domain.xml
 
@@ -376,7 +419,13 @@ class TestDomainOverrides:
             output_dir=tmp_path,
         )
         backend = FakeBackend()
-        execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+        execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
+        )
         (domain,) = backend.domains.values()
         return backend, domain.xml
 
@@ -412,24 +461,33 @@ class TestDomainOverrides:
         )
         backend = FakeBackend()
         with pytest.raises(ValidationError):
-            execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
+            execute(
+                spec,
+                backend=backend,
+                matcher=_default_matcher(),
+                work_root=tmp_path,
+                shell_factory=fake_shell_factory(),
+            )
         assert backend.calls == []
 
 
 class TestGuestSession:
-    """Runner ma czekać na gościa i odpalać sklep w sesji użytkownika, nie jako root bez DISPLAY."""
+    """Runner czeka na gościa i odpala sklep przez GuestShell (SSH) w sesji użytkownika.
 
-    def _agent_commands(self, backend: FakeBackend) -> list[list[str]]:
-        return [c.args[1] for c in backend.calls if c.method == "qemu_agent_exec"]
+    Agent zostaje tylko od „gość żyje" — jako root w `virt_qemu_ga_t` nie wejdzie
+    do sesji (SELinux), co pokazała sonda z 2026-08-22.
+    """
 
     def _run(
         self,
         tmp_path: Path,
         backend: FakeBackend,
+        shell: FakeShell,
         *,
         driver: object | None = None,
         guest_user: str = "test",
         waits: GuestWaits | None = None,
+        factory: object | None = None,
     ) -> None:
         spec = MatrixRunSpec(
             apps=["org.kde.kcalc"],  # type: ignore[arg-type]
@@ -450,18 +508,27 @@ class TestGuestSession:
             drivers={DistroName.FEDORA_KDE: driver} if driver is not None else None,  # type: ignore[dict-item]
             work_root=tmp_path,
             waits=waits,
+            shell_factory=factory if factory is not None else fake_shell_factory(shell),  # type: ignore[arg-type]
         )
 
-    def test_launch_commands_are_wrapped_in_user_session(self, tmp_path: Path) -> None:
-        backend = FakeBackend()
-        self._run(tmp_path, backend, driver=DiscoverDriver())
-        launches = [c for c in self._agent_commands(backend) if "systemd-run" in c]
-        assert len(launches) == 1
-        (cmd,) = launches
-        assert cmd[:4] == ["runuser", "-u", "test", "--"]
-        assert "XDG_RUNTIME_DIR=/run/user/1000" in cmd
-        assert cmd[-2:] == ["plasma-discover", "--application=appstream:org.kde.kcalc"]
-        assert "--wait" not in cmd
+    def test_launch_goes_through_shell_as_detached_user_unit(self, tmp_path: Path) -> None:
+        screen = FakeScreen()
+        backend, shell = FakeBackend(screen=screen), FakeShell(screen=screen)
+        self._run(tmp_path, backend, shell, driver=DiscoverDriver())
+        launches = [c for c in shell.calls if c[:1] == ["systemd-run"]]
+        assert launches == [
+            [
+                "systemd-run",
+                "--user",
+                "--collect",
+                "--quiet",
+                "--",
+                "plasma-discover",
+                "--application=appstream:org.kde.kcalc",
+            ]
+        ]
+        agent = [c.args[1] for c in backend.calls if c.method == "qemu_agent_exec"]
+        assert agent == [["true"]], "agent służy tylko do pingu, nie do uruchamiania sklepu"
 
     def test_all_but_last_driver_command_get_wait(self, tmp_path: Path) -> None:
         class _ThreeStep:
@@ -470,50 +537,61 @@ class TestGuestSession:
             def commands_for(self, app: str) -> list[list[str]]:
                 return [["store", "--quit"], ["store", "--refresh"], ["store", f"--details={app}"]]
 
-        backend = FakeBackend()
-        self._run(tmp_path, backend, driver=_ThreeStep())
-        launches = [c for c in self._agent_commands(backend) if "systemd-run" in c]
+        shell = FakeShell()
+        self._run(tmp_path, FakeBackend(), shell, driver=_ThreeStep())
+        launches = [c for c in shell.calls if c[:1] == ["systemd-run"]]
         assert ["--wait" in c for c in launches] == [True, True, False]
         assert [c[-1] for c in launches] == ["--quit", "--refresh", "--details=org.kde.kcalc"]
 
     def test_readiness_precedes_launch(self, tmp_path: Path) -> None:
-        backend = FakeBackend()
-        self._run(tmp_path, backend, driver=DiscoverDriver())
-        cmds = self._agent_commands(backend)
-        kinds = [
-            "ping"
-            if c == ["true"]
-            else "uid"
-            if c[:2] == ["id", "-u"]
-            else "probe"
-            if "is-active" in c
-            else "launch"
-            if "systemd-run" in c
-            else "?"
-            for c in cmds
-        ]
-        assert kinds == ["ping", "uid", "probe", "launch"]
+        screen = FakeScreen()
+        backend, shell = FakeBackend(screen=screen), FakeShell(screen=screen)
+        self._run(tmp_path, backend, shell, driver=DiscoverDriver())
+        assert shell.calls[:2] == [["true"], SESSION_PROBE]
+        assert shell.calls[2][:1] == ["systemd-run"]
         methods = [c.method for c in backend.calls]
         assert (
             methods.index("create") < methods.index("qemu_agent_exec") < methods.index("screenshot")
         )
 
-    def test_guest_user_from_spec_is_used(self, tmp_path: Path) -> None:
-        backend = FakeBackend(agent_output={"id -u kacper": "1234"})
-        self._run(tmp_path, backend, driver=DiscoverDriver(), guest_user="kacper")
-        cmds = self._agent_commands(backend)
-        assert ["id", "-u", "kacper"] in cmds
-        launch = next(c for c in cmds if "systemd-run" in c)
-        assert launch[:3] == ["runuser", "-u", "kacper"]
-        assert "XDG_RUNTIME_DIR=/run/user/1234" in launch
+    def test_shell_factory_gets_clone_port_and_guest_user(self, tmp_path: Path) -> None:
+        seen: list[tuple[int, str]] = []
+        shell = FakeShell()
 
-    def test_readiness_failure_still_tears_down(self, tmp_path: Path) -> None:
+        def factory(domain: DomainConfig, distro: DistroSpec) -> FakeShell:
+            seen.append((domain.ssh_port, distro.guest_user))
+            return shell
+
+        self._run(tmp_path, FakeBackend(), shell, guest_user="kacper", factory=factory)
+        assert len(seen) == 1
+        port, user = seen[0]
+        assert user == "kacper"
+        assert 1024 <= port <= 65535
+        assert shell.calls, "fabryka ma dać shell, którego runner faktycznie używa"
+
+    def test_agent_never_up_still_tears_down(self, tmp_path: Path) -> None:
         backend = FakeBackend(agent_fail_first=10**6)
         waits = GuestWaits.instant(agent_timeout=3.0, probe_interval=1.0)
         with pytest.raises(TimeoutError, match="guest agent"):
-            self._run(tmp_path, backend, driver=DiscoverDriver(), waits=waits)
+            self._run(tmp_path, backend, FakeShell(), driver=DiscoverDriver(), waits=waits)
         assert "destroy" in {c.method for c in backend.calls}
         assert list(tmp_path.glob("*.qcow2")) == []
+
+    def test_shell_never_reachable_still_tears_down(self, tmp_path: Path) -> None:
+        backend = FakeBackend()
+        waits = GuestWaits.instant(shell_timeout=3.0, probe_interval=1.0)
+        with pytest.raises(TimeoutError, match="guest shell"):
+            self._run(tmp_path, backend, FakeShell(fail_first=10**6), waits=waits)
+        assert "destroy" in {c.method for c in backend.calls}
+
+    def test_session_never_active_still_tears_down(self, tmp_path: Path) -> None:
+        backend = FakeBackend()
+        shell = FakeShell(output={" ".join(SESSION_PROBE): "inactive"})
+        waits = GuestWaits.instant(session_timeout=3.0, probe_interval=1.0)
+        with pytest.raises(TimeoutError, match="graphical session"):
+            self._run(tmp_path, backend, shell, waits=waits)
+        assert "destroy" in {c.method for c in backend.calls}
+        assert not any(c[:1] == ["systemd-run"] for c in shell.calls)
 
 
 class TestTimings:
@@ -526,18 +604,21 @@ class TestTimings:
             dry_run=False,
             output_dir=tmp_path,
         )
+        screen = FakeScreen()
         report = execute(
             spec,
-            backend=FakeBackend(),
+            backend=FakeBackend(screen=screen),
             matcher=_default_matcher(),
             drivers={DistroName.FEDORA_KDE: DiscoverDriver()},
             work_root=tmp_path,
+            shell_factory=fake_shell_factory(screen=screen),
         )
         phases = [(t.phase, t.app) for t in report.timings]
         assert phases == [
             ("create_overlay", None),
             ("create", None),
             ("wait_agent", None),
+            ("wait_shell", None),
             ("wait_session", None),
             ("launch", "org.kde.kcalc"),
             ("settle", "org.kde.kcalc"),
@@ -552,15 +633,17 @@ class TestTimings:
         assert all(t.seconds >= 0.0 for t in report.timings)
         launch = next(t for t in report.timings if t.phase == "launch")
         assert launch.detail["commands"] == 1
-        settle = next(t for t in report.timings if t.phase == "settle")
-        assert settle.detail["settled"] is True
-        frames = settle.detail["frames"]
+        settles = [t for t in report.timings if t.phase == "settle"]
+        assert [t.detail["settled"] for t in settles] == [True, True]
+        assert [t.detail["changed"] for t in settles] == [True, True]
+        frames = settles[0].detail["frames"]
         assert isinstance(frames, int)
         assert frames >= 2
         totals = report.phase_totals()
         assert {
             "create",
             "wait_agent",
+            "wait_shell",
             "wait_session",
             "launch",
             "settle",
@@ -569,7 +652,9 @@ class TestTimings:
             "boot",
             "run_total",
         } <= set(totals)
-        assert totals["boot"] == totals["create"] + totals["wait_agent"] + totals["wait_session"]
+        assert totals["boot"] == (
+            totals["create"] + totals["wait_agent"] + totals["wait_shell"] + totals["wait_session"]
+        )
 
     def test_dry_run_records_only_what_ran(self) -> None:
         spec = _spec([_distro(DistroName.FEDORA_KDE)], ["org.kde.kcalc"])
@@ -584,7 +669,11 @@ class TestTimings:
             output_dir=tmp_path,
         )
         report = execute(
-            spec, backend=FakeBackend(), matcher=_default_matcher(), work_root=tmp_path
+            spec,
+            backend=FakeBackend(),
+            matcher=_default_matcher(),
+            work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
         )
         assert "launch" not in {t.phase for t in report.timings}
 
@@ -635,6 +724,7 @@ class TestStoreProxyIntegration:
             matcher=_default_matcher(),
             store_proxy_provider=provider,
             work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
         )
         assert provider.calls == [("ubuntu-24.04", ["org.kde.kcalc"])]
 
@@ -672,6 +762,7 @@ class TestStoreProxyIntegration:
             matcher=_default_matcher(),
             store_proxy_provider=provider,
             work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
         )
         assert proxy.events == ["start", "wait_ready", "stop"]
 
@@ -709,6 +800,7 @@ class TestStoreProxyIntegration:
             matcher=_default_matcher(),
             store_proxy_provider=lambda _d, _a: _FakeProxy(),
             work_root=tmp_path,
+            shell_factory=fake_shell_factory(),
         )
         assert seen_at_ready == [0]
         assert backend.calls, "po gotowości proxy przebieg ma normalnie bootować VM"
@@ -745,6 +837,7 @@ class TestStoreProxyIntegration:
                 matcher=_default_matcher(),
                 store_proxy_provider=lambda _d, _a: proxy,
                 work_root=tmp_path,
+                shell_factory=fake_shell_factory(),
             )
         assert proxy.events == ["start", "wait_ready", "stop"]
         assert backend.calls == []
@@ -781,7 +874,8 @@ class TestStoreProxyIntegration:
             dry_run=False,
             output_dir=tmp_path,
         )
-        backend = FakeBackend(raise_on_command={"broken-store-command"})
+        backend = FakeBackend()
+        shell = FakeShell(raise_on_command={"broken-store-command"})
         with pytest.raises(RuntimeError):
             execute(
                 spec,
@@ -790,6 +884,7 @@ class TestStoreProxyIntegration:
                 drivers={DistroName.UBUNTU: _FailingDriver()},  # type: ignore[dict-item]
                 store_proxy_provider=lambda _d, _a: proxy,
                 work_root=tmp_path,
+                shell_factory=fake_shell_factory(shell),
             )
         assert proxy.events == ["start", "wait_ready", "stop"]
 

@@ -1,20 +1,26 @@
 """Gotowość gościa i uruchamianie komend w jego sesji graficznej.
 
-`qemu-guest-agent` wykonuje komendy jako root, bez `DISPLAY`, bez szyny sesji
-i bez czekania na cokolwiek — a drivery sklepów opisują komendy GUI, które
-mają się narysować na pulpicie autologowanego użytkownika i nigdy się nie
-kończą. Ten moduł łata obie różnice:
+Drivery sklepów opisują komendy GUI, które mają się narysować na pulpicie
+autologowanego użytkownika i nigdy się nie kończą. ``qemu-guest-agent`` nie
+nadaje się do ich odpalania: działa jako root w domenie SELinux
+``virt_qemu_ga_t``, która nie może zmienić użytkownika (``runuser``, ``setpriv``:
+„Operation not permitted") ani zagadać do systemd (``systemd-run``: „Access
+denied") — sprawdzone na Fedorze 44, 2026-08-22. Dlatego:
 
-- ``wait_for_agent`` / ``wait_for_session`` — zanim cokolwiek ruszy, agent
-  musi odpowiadać, a ``graphical-session.target`` użytkownika musi być
-  ``active`` (to jest moment, w którym kompozytor już rysuje);
-- ``session_command`` — owija argv w ``runuser -u <user> -- env
-  XDG_RUNTIME_DIR=… systemd-run --user …``: proces startuje w managerze
-  użytkownika (GNOME i Plasma importują tam DISPLAY/WAYLAND_DISPLAY/DBUS),
-  a ``systemd-run`` odczepia go, więc ``guest-exec`` wraca od razu;
-- ``settle_screenshot`` — zrzut dopiero wtedy, gdy kolejne klatki przestają
-  się różnić (ta sama pętla, co w ``domains/capture/run.py``, której nie wolno
-  stąd importować — granice domen).
+- ``wait_for_agent`` — agent służy tylko za „gość żyje" (``guest-exec true``)
+  i za kanał do ``virsh screenshot``;
+- ``wait_for_shell`` / ``wait_for_session`` — komendy w sesji idą przez
+  ``GuestShell`` (na żywo SSH jako użytkownik sesji, przez przekierowany port
+  passt): najpierw czekamy, aż SSH odpowiada, potem aż ``graphical-session.target``
+  użytkownika jest ``active`` (kompozytor już rysuje);
+- ``session_command`` / ``launch`` — każde argv owinięte w ``systemd-run --user
+  --collect --quiet [--wait] -- …``: proces startuje w managerze użytkownika
+  (GNOME i Plasma importują tam DISPLAY/WAYLAND_DISPLAY/DBUS), a bez ``--wait``
+  ``systemd-run`` odczepia go, więc wywołanie wraca od razu;
+- ``settle_screenshot`` — zrzut dopiero wtedy, gdy kolejne klatki przestają się
+  różnić **i** różnią się od klatki sprzed uruchomienia (stabilny pulpit to nie
+  jest wyrenderowany sklep). Ta sama pętla, co w ``domains/capture/run.py``,
+  której nie wolno stąd importować — granice domen.
 
 Czekanie idzie przez ``GuestWaits`` z wstrzykiwanym zegarem: w trybie testowym
 (``SCREENWRIGHT_TESTS_FAST``) ``sleep`` tylko przesuwa sztuczny zegar, więc
@@ -36,6 +42,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from shared.ports import LibvirtBackend
+
+    from domains.matrix.ports import GuestShell
+
+SESSION_PROBE = ["systemctl", "--user", "is-active", "graphical-session.target"]
+"""Komenda (jako użytkownik sesji) mówiąca, czy sesja graficzna już działa."""
 
 
 class FakeClock:
@@ -61,11 +72,13 @@ class GuestWaits:
     """
 
     agent_timeout: float = 180.0
+    shell_timeout: float = 120.0
     session_timeout: float = 120.0
     probe_interval: float = 1.0
-    probe_timeout: float = 10.0
+    probe_timeout: float = 20.0
+    launch_timeout: float = 60.0
     settle_min_wait: float = 3.0
-    settle_timeout: float = 30.0
+    settle_timeout: float = 120.0
     settle_interval: float = 1.0
     stable_frames: int = 2
     clock: Callable[[], float] = time.monotonic
@@ -83,21 +96,10 @@ class GuestWaits:
 
 
 @dataclass(frozen=True)
-class GuestSession:
-    """Użytkownik sesji graficznej w gościu i jego ``XDG_RUNTIME_DIR``."""
-
-    user: str
-    uid: int
-
-    @property
-    def runtime_dir(self) -> str:
-        return f"/run/user/{self.uid}"
-
-
-@dataclass(frozen=True)
 class SettleInfo:
     frames: int
     settled: bool
+    changed: bool
     elapsed: float
 
 
@@ -120,52 +122,49 @@ def wait_for_agent(backend: LibvirtBackend, name: str, *, waits: GuestWaits) -> 
         waits.sleep(waits.probe_interval)
 
 
-def resolve_session(
-    backend: LibvirtBackend, name: str, user: str, *, waits: GuestWaits
-) -> GuestSession:
-    """``id -u <user>`` w gościu — uid potrzebny do ``/run/user/<uid>``."""
-    out = backend.qemu_agent_exec(name, ["id", "-u", user], timeout=waits.probe_timeout)
-    try:
-        uid = int(out.strip())
-    except ValueError as exc:
-        raise RuntimeError(f"cannot resolve uid of {user!r} in {name}: {out!r}") from exc
-    return GuestSession(user=user, uid=uid)
+def wait_for_shell(shell: GuestShell, *, waits: GuestWaits) -> None:
+    """Czeka, aż ``shell.run(["true"])`` przejdzie — sshd, passt i klucz muszą się zgrać."""
+    deadline = waits.clock() + waits.shell_timeout
+    last_error: Exception | None = None
+    while True:
+        try:
+            shell.run(["true"], timeout=waits.probe_timeout)
+            return
+        except Exception as exc:  # connection refused / timeout — gość jeszcze nie nasłuchuje
+            last_error = exc
+        if waits.clock() >= deadline:
+            raise TimeoutError(
+                f"guest shell did not answer within {waits.shell_timeout:g}s: {last_error}"
+            )
+        waits.sleep(waits.probe_interval)
 
 
-def session_probe(session: GuestSession) -> list[str]:
-    """Komenda sprawdzająca, czy sesja graficzna użytkownika już działa."""
-    return _as_user(session, ["systemctl", "--user", "is-active", "graphical-session.target"])
-
-
-def wait_for_session(
-    backend: LibvirtBackend, name: str, session: GuestSession, *, waits: GuestWaits
-) -> None:
+def wait_for_session(shell: GuestShell, *, waits: GuestWaits) -> None:
     """Czeka na ``graphical-session.target`` = ``active`` u użytkownika sesji.
 
     ``systemctl is-active`` kończy się kodem 3, gdy target nie jest aktywny, a
-    backend zamienia niezerowy kod na wyjątek — stąd próba jest udana tylko
+    shell zamienia niezerowy kod na wyjątek — stąd próba jest udana tylko
     wtedy, gdy nie rzuciła **i** wypisała ``active``.
     """
     deadline = waits.clock() + waits.session_timeout
-    probe = session_probe(session)
-    last: str = ""
+    last = ""
     while True:
         try:
-            last = backend.qemu_agent_exec(name, probe, timeout=waits.probe_timeout).strip()
-        except Exception as exc:  # niezerowy kod systemctl → RuntimeError z backendu
+            last = shell.run(SESSION_PROBE, timeout=waits.probe_timeout).strip()
+        except Exception as exc:  # niezerowy kod systemctl → RuntimeError z shella
             last = f"error: {exc}"
         if last == "active":
             return
         if waits.clock() >= deadline:
             raise TimeoutError(
-                f"graphical session of {session.user!r} in {name} not active after "
-                f"{waits.session_timeout:g}s (last answer: {last!r})"
+                f"graphical session not active after {waits.session_timeout:g}s "
+                f"(last answer: {last!r})"
             )
         waits.sleep(waits.probe_interval)
 
 
-def session_command(cmd: list[str], session: GuestSession, *, wait: bool) -> list[str]:
-    """Owija argv tak, by ruszył w sesji graficznej użytkownika i nie blokował agenta.
+def session_command(cmd: list[str], *, wait: bool) -> list[str]:
+    """Owija argv tak, by ruszył w managerze użytkownika i nie blokował wywołującego.
 
     ``wait=True`` każe ``systemd-run`` poczekać na koniec komendy — dla kroków
     pomocniczych (``gnome-software --quit``), które mają skończyć się przed
@@ -175,62 +174,81 @@ def session_command(cmd: list[str], session: GuestSession, *, wait: bool) -> lis
     unit = ["systemd-run", "--user", "--collect", "--quiet"]
     if wait:
         unit.append("--wait")
-    return _as_user(session, [*unit, "--", *cmd])
+    return [*unit, "--", *cmd]
 
 
-def _as_user(session: GuestSession, cmd: list[str]) -> list[str]:
-    """``runuser`` zamiast ``su``/``sudo``: bez PAM-owej sesji, bez hasła, jako root z agenta."""
-    runtime_dir = session.runtime_dir
-    return [
-        "runuser",
-        "-u",
-        session.user,
-        "--",
-        "env",
-        f"XDG_RUNTIME_DIR={runtime_dir}",
-        f"DBUS_SESSION_BUS_ADDRESS=unix:path={runtime_dir}/bus",
-        *cmd,
-    ]
+def launch(shell: GuestShell, commands: list[list[str]], *, waits: GuestWaits) -> None:
+    """Komendy drivera w sesji użytkownika: wszystkie poza ostatnią z ``--wait``.
+
+    Ostatnia otwiera stronę aplikacji i zostaje na ekranie — na nią czeka
+    już ``settle_screenshot``, nie ``systemd-run``.
+    """
+    last = len(commands) - 1
+    for index, cmd in enumerate(commands):
+        shell.run(session_command(cmd, wait=index < last), timeout=waits.launch_timeout)
+
+
+def frame_digest(backend: LibvirtBackend, name: str, out_path: Path) -> str:
+    """Jedna klatka ekranu + jej skrót — punkt odniesienia dla ``settle_screenshot``."""
+    backend.screenshot(name, out_path)
+    return hashlib.sha256(out_path.read_bytes()).hexdigest()
 
 
 def settle_screenshot(
-    backend: LibvirtBackend, name: str, out_path: Path, *, waits: GuestWaits
+    backend: LibvirtBackend,
+    name: str,
+    out_path: Path,
+    *,
+    waits: GuestWaits,
+    baseline: str | None = None,
 ) -> SettleInfo:
     """Robi zrzuty, aż ``stable_frames`` kolejnych klatek jest identycznych.
 
-    Ostatnia klatka zostaje w ``out_path`` — to jest zrzut do porównania.
-    Po ``settle_timeout`` oddajemy, co mamy, z ``settled=False`` (migający
-    kursor potrafi nigdy nie dać dwóch równych klatek); zrzut jest i tak
-    lepszy niż brak dowodu.
+    Z ``baseline`` (skrót klatki sprzed uruchomienia sklepu) klatki równe
+    punktowi odniesienia nie liczą się jako ustabilizowane — ekran, który się
+    nie zmienił, to sklep, który się jeszcze nie narysował. Ostatnia klatka
+    zostaje w ``out_path``; po ``settle_timeout`` oddajemy, co mamy, z
+    ``settled=False`` (zrzut jest lepszy niż brak dowodu).
     """
     started = waits.clock()
     previous: str | None = None
     repeats = 0
     frames = 0
+    changed = baseline is None
     while True:
         backend.screenshot(name, out_path)
         frames += 1
         digest = hashlib.sha256(out_path.read_bytes()).hexdigest()
+        if digest != baseline:
+            changed = True
         repeats = repeats + 1 if digest == previous else 1
         previous = digest
         elapsed = waits.clock() - started
-        if repeats >= waits.stable_frames and elapsed >= waits.settle_min_wait:
-            return SettleInfo(frames=frames, settled=True, elapsed=elapsed)
+        if changed and repeats >= waits.stable_frames and elapsed >= waits.settle_min_wait:
+            return SettleInfo(frames=frames, settled=True, changed=True, elapsed=elapsed)
         if elapsed >= waits.settle_timeout:
-            log_entry(30, "matrix.guest.not_settled", domain=name, frames=frames, elapsed=elapsed)
-            return SettleInfo(frames=frames, settled=False, elapsed=elapsed)
+            log_entry(
+                30,
+                "matrix.guest.not_settled",
+                domain=name,
+                frames=frames,
+                changed=changed,
+                elapsed=elapsed,
+            )
+            return SettleInfo(frames=frames, settled=False, changed=changed, elapsed=elapsed)
         waits.sleep(waits.settle_interval)
 
 
 __all__ = [
+    "SESSION_PROBE",
     "FakeClock",
-    "GuestSession",
     "GuestWaits",
     "SettleInfo",
-    "resolve_session",
+    "frame_digest",
+    "launch",
     "session_command",
-    "session_probe",
     "settle_screenshot",
     "wait_for_agent",
     "wait_for_session",
+    "wait_for_shell",
 ]
