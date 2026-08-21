@@ -554,7 +554,9 @@ class TestTimings:
         assert launch.detail["commands"] == 1
         settle = next(t for t in report.timings if t.phase == "settle")
         assert settle.detail["settled"] is True
-        assert settle.detail["frames"] >= 2
+        frames = settle.detail["frames"]
+        assert isinstance(frames, int)
+        assert frames >= 2
         totals = report.phase_totals()
         assert {
             "create",

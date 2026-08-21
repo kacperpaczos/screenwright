@@ -134,14 +134,19 @@ class FakeBackend:
         if name in self._domains:
             self._domains[name].saved = True
 
-    def restore(self, state_file: Path) -> str:
-        self._record("restore", state_file)
+    def restore(self, state_file: Path, xml: Path | None = None) -> None:
+        self._record("restore", state_file, xml)
         if state_file not in self._states:
             raise RuntimeError(f"no fake save file at {state_file}")
         name = self._states[state_file]
         state = self._domains.setdefault(name, DomainState(name=name, xml=""))
         state.started = True
-        return name
+        if xml is not None:
+            state.xml = xml.read_text() if xml.exists() else state.xml
+
+    def restored_name(self, state_file: Path) -> str:
+        """Nazwa domeny, którą przywróciłby `restore(state_file)` — dla asercji w testach."""
+        return self._states[state_file]
 
     def screenshot(self, name: str, out_path: Path) -> Path:
         self._record("screenshot", name, out_path)

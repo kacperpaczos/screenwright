@@ -255,6 +255,14 @@ def test_save_and_restore_use_state_file(monkeypatch: pytest.MonkeyPatch) -> Non
     assert restore_args[3:] == ["restore", str(state)]
 
 
+def test_restore_passes_xml_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--xml` idzie do virsh tylko wtedy, gdy caller poda plik — i dokładnie za ścieżką stanu."""
+    popen = _FakePopen([_completed(["virsh", "restore"])])
+    monkeypatch.setattr("subprocess.run", popen)
+    VirshBackend().restore(Path("/tmp/v1.state"), xml=Path("/tmp/v1.xml"))
+    assert popen.calls[0]["args"][3:] == ["restore", "/tmp/v1.state", "--xml", "/tmp/v1.xml"]
+
+
 def test_start_destroy_use_unified_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """Nazwa domeny podawana do virsh jest spójna (definiuje ją caller)."""
     popen = _FakePopen(

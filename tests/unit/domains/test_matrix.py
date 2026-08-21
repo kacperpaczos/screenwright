@@ -151,9 +151,21 @@ class TestFakeBackend:
         assert state.exists()
         assert b.domains["v1"].saved
         b.destroy("v1")
-        restored_name = b.restore(state)
-        assert restored_name == "v1"
+        assert b.restored_name(state) == "v1"
+        assert b.restore(state) is None  # port: restore() -> None, jak VirshBackend
         assert b.domains["v1"].started
+
+    def test_restore_records_xml_override(self, tmp_path: Path) -> None:
+        b = FakeBackend()
+        b.create("<xml/>", "v1")
+        state = tmp_path / "v1.state"
+        b.save("v1", state)
+        override = tmp_path / "v1.xml"
+        override.write_text("<domain><name>v1</name></domain>")
+        b.restore(state, xml=override)
+        call = next(c for c in b.calls if c.method == "restore")
+        assert call.args == (state, override)
+        assert b.domains["v1"].xml == "<domain><name>v1</name></domain>"
 
 
 class TestDistroSpec:

@@ -88,9 +88,19 @@ class VirshBackend:
         """
         self._run(["save", name, str(state_file)])
 
-    def restore(self, state_file: Path) -> None:
-        """Przywraca domenę z pliku stanu. Po restore domena jest nie-transient."""
-        self._run(["restore", str(state_file)])
+    def restore(self, state_file: Path, xml: Path | None = None) -> None:
+        """Przywraca domenę z pliku stanu (``virsh restore``).
+
+        ``xml`` to plik z XML-em domeny podstawiany za ten zapisany w stanie
+        (``--xml``): libvirt sprawdza zgodność ABI (nazwa, uuid, MAC, pamięć,
+        urządzenia), ale pozwala zmienić ścieżki dysków — warm cache przywraca
+        stan na świeżym overlayu pod tą samą ścieżką i bez ``--xml`` libvirt
+        mógłby wziąć zapisany łańcuch backing zamiast tego z nagłówka qcow2.
+        """
+        args = ["restore", str(state_file)]
+        if xml is not None:
+            args += ["--xml", str(xml)]
+        self._run(args)
 
     def screenshot(self, name: str, out_path: Path) -> Path:
         self._run(["screenshot", name, str(out_path)])
