@@ -59,6 +59,8 @@ konfigurować w `/etc/libvirt` — demon sesyjny startuje sam przy pierwszym
   seed/
     ubuntu-24.04-seed.iso                # NoCloud seed użyty przy budowie
   build/                                 # katalogi robocze budowy (+ console.log)
+  runs/                                  # overlaye zimnych klonów i zrzuty przebiegu (--work-root)
+  warm/<distro>/                         # szablony warm cache (patrz niżej)
 
 # Tu w repo:
 vm/
@@ -156,7 +158,9 @@ python -m cli matrix --spec matrix-spec.json --execute \
 ```
 
 Raport ląduje w `vm/reports/matrix.json` (struktura: `MatrixReport`
-z `shared/results.py`).
+z `shared/results.py`), zrzuty i overlaye zimnych klonów w
+`~/.local/share/screenwright/images/runs/` (`--work-root`; celowo nie `/tmp` —
+na Fedorze to tmpfs i overlay zimnego klona potrafi go zapełnić w minutę).
 
 `--execute` nie wystarczy: spec z `"dry_run": true` jest blokadą i CLI odmówi
 (kod 2). Żeby bootować prawdziwe maszyny, spec musi mieć `dry_run: false`

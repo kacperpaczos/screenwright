@@ -46,6 +46,7 @@ def _args(spec: Path, **overrides: object) -> argparse.Namespace:
         "store_proxy_port": 8900,
         "cli_serve_base": "http://127.0.0.1:8899",
         "media_dir": str(spec.parent),
+        "work_root": str(spec.parent / "runs"),
     }
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -228,3 +229,21 @@ class TestWarmCacheFlags:
         phases = [t["phase"] for t in json.loads(out.read_text())["timings"]]
         assert "warm_save" in phases
         assert "warm_restore" in phases
+
+
+class TestWorkRoot:
+    def test_execute_writes_screenshots_under_work_root(self, tmp_path: Path) -> None:
+        spec_path = _write_spec(
+            tmp_path,
+            {
+                "apps": ["org.kde.kcalc"],
+                "distros": [{"name": "fedora-kde", "golden_image": "/tmp/x.qcow2"}],
+                "dry_run": False,
+            },
+        )
+        out = tmp_path / "report.json"
+        assert run_matrix_execute(_args(spec_path, execute=True, output=str(out))) == 0
+        report = json.loads(out.read_text())
+        shot = Path(report["results"][0]["actual_screenshot"])
+        assert shot.parent == tmp_path / "runs"
+        assert shot.exists()

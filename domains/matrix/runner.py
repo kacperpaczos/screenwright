@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from shared.logging import log_entry
 from shared.results import MatrixReport, PhaseTiming, Score, VerificationResult
+from shared.settings import load_settings
 
 if TYPE_CHECKING:
     from shared.ports import LibvirtBackend
@@ -137,7 +138,7 @@ def execute(
     drivers: dict[DistroName, StoreDriver] | None = None,
     matcher: TemplateMatcherPort | None = None,
     reporter: ReporterSink | None = None,
-    work_root: Path = Path("/tmp/screenwright-matrix"),
+    work_root: Path | None = None,
     store_proxy_provider: StoreProxyProvider | None = None,
     waits: GuestWaits | None = None,
     shell_factory: GuestShellFactory | None = None,
@@ -175,6 +176,11 @@ def execute(
         waits = GuestWaits.default()
     if shell_factory is None:
         shell_factory = ssh_shell_for
+    if work_root is None:
+        # Nie /tmp: na Fedorze to tmpfs, a overlay zimnego klona rośnie o wszystko,
+        # co sklep zapisze (PackageKit na KDE zapełnił go w minutę — „Disk quota
+        # exceeded", VM stanęła, virsh screenshot padał).
+        work_root = load_settings().image_root / "runs"
     if matcher is None:
         matcher = _build_matcher(spec.verify_threshold)
     started_at = datetime.now(UTC)

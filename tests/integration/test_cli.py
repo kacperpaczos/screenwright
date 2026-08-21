@@ -110,6 +110,8 @@ def test_matrix_execute_refuses_spec_pinned_dry_run(tmp_path: Path) -> None:
             "fake",
             "--output",
             str(tmp_path / "report.json"),
+            "--work-root",
+            str(tmp_path / "runs"),
         ]
     )
     assert rc == 2
@@ -134,6 +136,8 @@ def test_matrix_execute_requires_backend_choice(tmp_path: Path) -> None:
             "fake",
             "--output",
             str(tmp_path / "report.json"),
+            "--work-root",
+            str(tmp_path / "runs"),
         ]
     )
     assert rc == 0

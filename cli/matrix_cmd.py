@@ -213,6 +213,7 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
         cache_key=cache_key or None,
     )
 
+    work_root_arg = getattr(args, "work_root", None)
     report = matrix_execute(
         spec,
         backend=backend,
@@ -222,6 +223,7 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
         shell_factory=shell_factory,
         warm_root=warm_root,
         cache_key=cache_key,
+        work_root=Path(work_root_arg).expanduser() if work_root_arg else None,
     )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

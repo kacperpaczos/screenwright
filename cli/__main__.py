@@ -75,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="katalog serwowany przez `cli serve` — z niego budowane są URL-e mediów",
     )
     p_matrix.add_argument(
+        "--work-root",
+        default=None,
+        help="katalog overlayów i zrzutów przebiegu (domyślnie <image_root>/runs; nie tmpfs)",
+    )
+    p_matrix.add_argument(
         "--warm-root",
         default=None,
         help="katalog szablonów warm cache (domyślnie <image_root>/warm dla --backend virsh)",
