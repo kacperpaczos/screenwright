@@ -85,6 +85,11 @@ schemas/      — JSON Schema files (corpus-index, ubuntu-autoinstall)
     python -m cli matrix --spec matrix-spec.json --execute \
         --backend fake --output vm/reports/matrix.json              # dry-run with FakeBackend
 
+`dry_run` is resolved from two places: without `--execute` the run is always a
+plan; with `--execute` the spec decides — `"dry_run": true` in the JSON is a
+lock that the flag does not override (the command exits with 2 and says so),
+`false` or an absent key lets the run go ahead.
+
 `--backend fake` is for tests and CI: it does NOT start real VMs and the
 verification matcher compares a screenshot to itself (always score 1.0),
 so any "passed" results are illustrative only. `--backend virsh` actually

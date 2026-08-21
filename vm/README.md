@@ -158,6 +158,10 @@ python -m cli matrix --spec matrix-spec.json --execute \
 Raport ląduje w `vm/reports/matrix.json` (struktura: `MatrixReport`
 z `shared/results.py`).
 
+`--execute` nie wystarczy: spec z `"dry_run": true` jest blokadą i CLI odmówi
+(kod 2). Żeby bootować prawdziwe maszyny, spec musi mieć `dry_run: false`
+(tak jest w `matrix-spec.json`) albo nie mieć tego klucza wcale.
+
 ## Save / restore (ciepły start)
 
 `VirshBackend` ma `save()` / `restore()` (`virsh save` działa dla domen

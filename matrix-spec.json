@@ -1,7 +1,7 @@
 {
   "apps": ["org.kde.kcalc", "org.gimp.GIMP"],
   "batch": 2,
-  "dry_run": true,
+  "dry_run": false,
   "verify_threshold": 0.85,
   "templates_dir": null,
   "distros": [

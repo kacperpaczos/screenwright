@@ -78,6 +78,15 @@ class TestLoadSpec:
         assert _load_spec(_args(spec_path)).dry_run is True
         assert _load_spec(_args(spec_path, execute=True)).dry_run is False
 
+    def test_spec_dry_run_true_survives_execute_flag(self, tmp_path: Path) -> None:
+        spec_path = _write_spec(tmp_path, {**_VALID_SPEC, "dry_run": True})
+        assert _load_spec(_args(spec_path, execute=True)).dry_run is True
+
+    def test_spec_dry_run_false_without_execute_is_still_dry(self, tmp_path: Path) -> None:
+        spec_path = _write_spec(tmp_path, {**_VALID_SPEC, "dry_run": False})
+        assert _load_spec(_args(spec_path)).dry_run is True
+        assert _load_spec(_args(spec_path, execute=True)).dry_run is False
+
 
 class TestMakeBackend:
     def test_fake(self) -> None:
@@ -121,6 +130,24 @@ class TestExitCodes:
         spec_path = _write_spec(tmp_path, _VALID_SPEC)
         out = tmp_path / "reports" / "matrix.json"
         assert run_matrix_execute(_args(spec_path, output=str(out))) == 0
+        report = json.loads(out.read_text(encoding="utf-8"))
+        assert report["results"]
+
+    def test_execute_refused_when_spec_pins_dry_run(self, tmp_path: Path) -> None:
+        spec_path = _write_spec(tmp_path, {**_VALID_SPEC, "dry_run": True})
+        out = tmp_path / "reports" / "matrix.json"
+        assert run_matrix_execute(_args(spec_path, execute=True, output=str(out))) == 2
+        assert not out.exists()
+
+    def test_execute_runs_when_spec_dry_run_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        spec_path = _write_spec(tmp_path, {**_VALID_SPEC, "dry_run": False})
+        out = tmp_path / "reports" / "matrix.json"
+        # FakeBackend + work_root: runner domyślnie pisze overlay do /tmp/screenwright-matrix;
+        # tu nie chodzi o overlay, tylko o to, że blokada NIE zadziałała.
+        monkeypatch.chdir(tmp_path)
+        assert run_matrix_execute(_args(spec_path, execute=True, output=str(out))) == 0
         report = json.loads(out.read_text(encoding="utf-8"))
         assert report["results"]
 

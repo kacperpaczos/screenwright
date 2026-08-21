@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 from domains.matrix.backend.fake import FakeBackend
 from domains.matrix.backend.virsh import VirshBackend
@@ -43,11 +44,25 @@ def _load_spec(args: argparse.Namespace) -> MatrixRunSpec:
         apps=spec_raw.get("apps", []),
         distros=distros,
         batch=spec_raw.get("batch", 2),
-        dry_run=not args.execute,
+        dry_run=_resolve_dry_run(spec_raw, execute=bool(getattr(args, "execute", False))),
         output_dir=Path(spec_raw.get("output_dir", "vm/reports")),
         templates_dir=(Path(spec_raw["templates_dir"]) if spec_raw.get("templates_dir") else None),
         verify_threshold=float(spec_raw.get("verify_threshold", 0.85)),
     )
+
+
+def _resolve_dry_run(spec_raw: dict[str, Any], *, execute: bool) -> bool:
+    """Bez ``--execute`` zawsze sucho; z ``--execute`` decyduje spec.
+
+    ``"dry_run": true`` w JSON-ie jest blokadą, której flaga nie zdejmuje —
+    żeby odpalić prawdziwe maszyny trzeba **i** ``--execute``, **i**
+    ``dry_run=false`` (albo brak klucza) w specu. Wcześniej CLI po cichu
+    nadpisywało wartość z pliku, więc ``matrix-spec.json`` z ``dry_run: true``
+    i tak bootował VM-ki.
+    """
+    if not execute:
+        return True
+    return bool(spec_raw.get("dry_run", False))
 
 
 def run_matrix_plan(args: argparse.Namespace) -> int:
@@ -117,6 +132,14 @@ def _drivers_for_spec(spec: MatrixRunSpec) -> dict[DistroName, StoreDriver]:
 def run_matrix_execute(args: argparse.Namespace) -> int:
     try:
         spec = _load_spec(args)
+        if getattr(args, "execute", False) and spec.dry_run:
+            log_entry(
+                40,
+                "cli.matrix.spec_pins_dry_run",
+                spec=str(args.spec),
+                hint="spec ma dry_run=true; ustaw dry_run=false (albo usuń klucz), żeby --execute ruszył",
+            )
+            return 2
         backend: LibvirtBackend = _make_backend(args)
         matcher: TemplateMatcherPort = _make_matcher(spec.verify_threshold)
         drivers = _drivers_for_spec(spec)

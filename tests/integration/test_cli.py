@@ -93,6 +93,29 @@ def test_override_missing_component(tmp_path: Path) -> None:
     assert rc == 3
 
 
+def test_matrix_execute_refuses_spec_pinned_dry_run(tmp_path: Path) -> None:
+    spec_file = tmp_path / "spec.json"
+    spec_file.write_text(
+        '{"apps": ["org.kde.kcalc"], "dry_run": true, '
+        '"distros": [{"name": "fedora-kde", "golden_image": "/tmp/x.qcow2"}]}',
+        encoding="utf-8",
+    )
+    rc = main(
+        [
+            "matrix",
+            "--spec",
+            str(spec_file),
+            "--execute",
+            "--backend",
+            "fake",
+            "--output",
+            str(tmp_path / "report.json"),
+        ]
+    )
+    assert rc == 2
+    assert not (tmp_path / "report.json").exists()
+
+
 def test_matrix_execute_requires_backend_choice(tmp_path: Path) -> None:
     import json as _json
 

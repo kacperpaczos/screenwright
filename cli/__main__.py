@@ -46,7 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_matrix = sub.add_parser("matrix", help="planuj lub wykonaj matrycę VM")
     p_matrix.add_argument("--spec", required=True)
-    p_matrix.add_argument("--execute", action="store_true")
+    p_matrix.add_argument(
+        "--execute",
+        action="store_true",
+        help="wykonaj zamiast planować; spec z dry_run=true i tak odmówi (blokada)",
+    )
     p_matrix.add_argument(
         "--backend",
         choices=["virsh", "fake"],
