@@ -19,8 +19,10 @@ denied") — sprawdzone na Fedorze 44, 2026-08-22. Dlatego:
   ``systemd-run`` odczepia go, więc wywołanie wraca od razu;
 - ``settle_screenshot`` — zrzut dopiero wtedy, gdy kolejne klatki przestają się
   różnić **i** różnią się od klatki sprzed uruchomienia (stabilny pulpit to nie
-  jest wyrenderowany sklep). Ta sama pętla, co w ``domains/capture/run.py``,
-  której nie wolno stąd importować — granice domen.
+  jest wyrenderowany sklep). Klatki porównujemy **odległością pikselową**, nie
+  skrótem: zegar w pasku GNOME przeskakuje co minutę i na skrótach wyglądał
+  jak „sklep się narysował". Ta sama idea, co pętla w
+  ``domains/capture/run.py``, której nie wolno stąd importować — granice domen.
 
 Czekanie idzie przez ``GuestWaits`` z wstrzykiwanym zegarem: w trybie testowym
 (``SCREENWRIGHT_TESTS_FAST``) ``sleep`` tylko przesuwa sztuczny zegar, więc
@@ -30,10 +32,12 @@ pętle kończą się natychmiast, a logika timeoutów jest nadal sprawdzalna.
 from __future__ import annotations
 
 import hashlib
+import io
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from PIL import Image, ImageChops
 from shared.logging import log_entry
 from shared.pydantic_utils import is_test_mode
 
@@ -81,6 +85,10 @@ class GuestWaits:
     settle_timeout: float = 120.0
     settle_interval: float = 1.0
     stable_frames: int = 2
+    change_threshold: float = 0.02
+    """Ułamek pikseli, które muszą się różnić od klatki bazowej, żeby uznać, że „coś się narysowało"."""
+    stable_threshold: float = 0.001
+    """Ułamek różniących się pikseli, poniżej którego dwie kolejne klatki są „takie same"."""
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
 
@@ -101,6 +109,35 @@ class SettleInfo:
     settled: bool
     changed: bool
     elapsed: float
+    distance: float = 0.0
+    """Odległość ostatniej klatki od klatki bazowej (ułamek różniących się pikseli)."""
+
+
+@dataclass(frozen=True)
+class Frame:
+    """Klatka ekranu: bajty PNG + obraz (``None``, gdy bajtów nie da się zdekodować)."""
+
+    data: bytes
+    image: Image.Image | None
+
+    @classmethod
+    def load(cls, path: Path) -> Frame:
+        data = path.read_bytes()
+        try:
+            image = Image.open(io.BytesIO(data)).convert("L")
+            image.load()
+        except Exception:  # nie-PNG (fake'i, uszkodzony plik) — porównamy bajty
+            image = None
+        return cls(data=data, image=image)
+
+    def distance(self, other: Frame) -> float:
+        """Ułamek pikseli różniących się o więcej niż szum (0.0 = identyczne, 1.0 = wszystko)."""
+        if self.image is None or other.image is None or self.image.size != other.image.size:
+            return 0.0 if self.data == other.data else 1.0
+        diff = ImageChops.difference(self.image, other.image).point(lambda v: 255 if v > 16 else 0)
+        hist = diff.histogram()
+        total = self.image.size[0] * self.image.size[1]
+        return hist[255] / total if total else 0.0
 
 
 def wait_for_agent(backend: LibvirtBackend, name: str, *, waits: GuestWaits) -> None:
@@ -189,9 +226,15 @@ def launch(shell: GuestShell, commands: list[list[str]], *, waits: GuestWaits) -
 
 
 def frame_digest(backend: LibvirtBackend, name: str, out_path: Path) -> str:
-    """Jedna klatka ekranu + jej skrót — punkt odniesienia dla ``settle_screenshot``."""
+    """Jedna klatka ekranu + jej skrót — do logów i asercji; do porównań służy ``Frame``."""
     backend.screenshot(name, out_path)
     return hashlib.sha256(out_path.read_bytes()).hexdigest()
+
+
+def capture_frame(backend: LibvirtBackend, name: str, out_path: Path) -> Frame:
+    """Jedna klatka ekranu — punkt odniesienia dla ``settle_screenshot``."""
+    backend.screenshot(name, out_path)
+    return Frame.load(out_path)
 
 
 def settle_screenshot(
@@ -200,32 +243,42 @@ def settle_screenshot(
     out_path: Path,
     *,
     waits: GuestWaits,
-    baseline: str | None = None,
+    baseline: Frame | None = None,
 ) -> SettleInfo:
-    """Robi zrzuty, aż ``stable_frames`` kolejnych klatek jest identycznych.
+    """Robi zrzuty, aż ``stable_frames`` kolejnych klatek jest „takich samych".
 
-    Z ``baseline`` (skrót klatki sprzed uruchomienia sklepu) klatki równe
-    punktowi odniesienia nie liczą się jako ustabilizowane — ekran, który się
-    nie zmienił, to sklep, który się jeszcze nie narysował. Ostatnia klatka
-    zostaje w ``out_path``; po ``settle_timeout`` oddajemy, co mamy, z
-    ``settled=False`` (zrzut jest lepszy niż brak dowodu).
+    Z ``baseline`` (klatka sprzed uruchomienia sklepu) ekran musi się najpierw
+    oddalić od punktu odniesienia o więcej niż ``change_threshold`` — inaczej
+    to sklep, który się jeszcze nie narysował (a tykający zegar w pasku nie
+    liczy się za zmianę). „Takie same" = odległość pikselowa poniżej
+    ``stable_threshold``. Ostatnia klatka zostaje w ``out_path``; po
+    ``settle_timeout`` oddajemy, co mamy, z ``settled=False`` (zrzut jest
+    lepszy niż brak dowodu).
     """
     started = waits.clock()
-    previous: str | None = None
+    previous: Frame | None = None
     repeats = 0
     frames = 0
     changed = baseline is None
+    distance = 0.0
     while True:
         backend.screenshot(name, out_path)
         frames += 1
-        digest = hashlib.sha256(out_path.read_bytes()).hexdigest()
-        if digest != baseline:
-            changed = True
-        repeats = repeats + 1 if digest == previous else 1
-        previous = digest
+        frame = Frame.load(out_path)
+        if baseline is not None:
+            distance = frame.distance(baseline)
+            if distance > waits.change_threshold:
+                changed = True
+        same_as_previous = (
+            previous is not None and frame.distance(previous) < waits.stable_threshold
+        )
+        repeats = repeats + 1 if same_as_previous else 1
+        previous = frame
         elapsed = waits.clock() - started
         if changed and repeats >= waits.stable_frames and elapsed >= waits.settle_min_wait:
-            return SettleInfo(frames=frames, settled=True, changed=True, elapsed=elapsed)
+            return SettleInfo(
+                frames=frames, settled=True, changed=True, elapsed=elapsed, distance=distance
+            )
         if elapsed >= waits.settle_timeout:
             log_entry(
                 30,
@@ -233,17 +286,22 @@ def settle_screenshot(
                 domain=name,
                 frames=frames,
                 changed=changed,
+                distance=round(distance, 4),
                 elapsed=elapsed,
             )
-            return SettleInfo(frames=frames, settled=False, changed=changed, elapsed=elapsed)
+            return SettleInfo(
+                frames=frames, settled=False, changed=changed, elapsed=elapsed, distance=distance
+            )
         waits.sleep(waits.settle_interval)
 
 
 __all__ = [
     "SESSION_PROBE",
     "FakeClock",
+    "Frame",
     "GuestWaits",
     "SettleInfo",
+    "capture_frame",
     "frame_digest",
     "launch",
     "session_command",

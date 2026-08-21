@@ -20,8 +20,9 @@ from domains.matrix.backend.fake import FakeBackend, make_unique_name
 from domains.matrix.backend.ssh import ssh_shell_for
 from domains.matrix.domain_xml import render_domain_xml
 from domains.matrix.guest import (
+    Frame,
     GuestWaits,
-    frame_digest,
+    capture_frame,
     launch,
     settle_screenshot,
     wait_for_agent,
@@ -202,13 +203,13 @@ def execute(
                     work_root / f"{name}-{app}.png" if not spec.dry_run else Path("/tmp/dry.png")
                 )
                 if not spec.dry_run:
-                    baseline: str | None = None
+                    baseline: Frame | None = None
                     if driver is not None and shell is not None:
                         with _timed(timings, distro_label, app, "launch") as detail:
                             commands = driver.commands_for(app)
                             detail["commands"] = len(commands)
                             if commands:
-                                baseline = frame_digest(backend, name, actual)
+                                baseline = capture_frame(backend, name, actual)
                                 launch(shell, commands, waits=waits)
                     with _timed(timings, distro_label, app, "settle") as detail:
                         settled = settle_screenshot(
@@ -217,6 +218,7 @@ def execute(
                         detail["frames"] = settled.frames
                         detail["settled"] = settled.settled
                         detail["changed"] = settled.changed
+                        detail["distance"] = round(settled.distance, 4)
                 template = _resolve_template(spec.templates_dir, distro.name, app)
                 with _timed(timings, distro_label, app, "verify"):
                     score = matcher.match(template, actual)

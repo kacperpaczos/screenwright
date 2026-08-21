@@ -9,8 +9,9 @@ import pytest
 from domains.matrix.backend.fake import FakeBackend, FakeScreen, FakeShell
 from domains.matrix.guest import (
     SESSION_PROBE,
+    Frame,
     GuestWaits,
-    frame_digest,
+    capture_frame,
     launch,
     session_command,
     settle_screenshot,
@@ -142,6 +143,46 @@ class TestLaunch:
         assert screen.generation == 1  # tylko odczepiona komenda „rysuje"
 
 
+class TestFrame:
+    def _png(self, tmp_path: Path, name: str, color: int, size: tuple[int, int] = (8, 8)) -> Path:
+        from PIL import Image
+
+        p = tmp_path / name
+        Image.new("L", size, color=color).save(p, format="PNG")
+        return p
+
+    def test_identical_frames_have_zero_distance(self, tmp_path: Path) -> None:
+        a = Frame.load(self._png(tmp_path, "a.png", 10))
+        b = Frame.load(self._png(tmp_path, "b.png", 10))
+        assert a.distance(b) == 0.0
+
+    def test_small_change_is_below_change_threshold(self, tmp_path: Path) -> None:
+        """Zegar w pasku: kilka pikseli — nie „sklep się narysował"."""
+        from PIL import Image
+
+        p = self._png(tmp_path, "a.png", 10, size=(40, 40))
+        img = Image.open(p).convert("L")
+        img.putpixel((0, 0), 255)  # 1 z 1600 pikseli
+        q = tmp_path / "b.png"
+        img.save(q, format="PNG")
+        d = Frame.load(p).distance(Frame.load(q))
+        assert 0.0 < d < GuestWaits().change_threshold
+
+    def test_whole_screen_change_is_one(self, tmp_path: Path) -> None:
+        a = Frame.load(self._png(tmp_path, "a.png", 0))
+        b = Frame.load(self._png(tmp_path, "b.png", 200))
+        assert a.distance(b) == 1.0
+
+    def test_undecodable_bytes_fall_back_to_byte_equality(self, tmp_path: Path) -> None:
+        (tmp_path / "x").write_bytes(b"frame-1")
+        (tmp_path / "y").write_bytes(b"frame-1")
+        (tmp_path / "z").write_bytes(b"frame-2")
+        x, y, z = (Frame.load(tmp_path / n) for n in ("x", "y", "z"))
+        assert x.image is None
+        assert x.distance(y) == 0.0
+        assert x.distance(z) == 1.0
+
+
 class TestSettleScreenshot:
     def test_stops_after_stable_frames(self, tmp_path: Path) -> None:
         backend = FakeBackend()
@@ -169,7 +210,7 @@ class TestSettleScreenshot:
         """Stabilny pulpit ≠ wyrenderowany sklep: bez zmiany względem baseline czekamy do limitu."""
         backend = FakeBackend()
         out = tmp_path / "shot.png"
-        baseline = frame_digest(backend, "vm", out)
+        baseline = capture_frame(backend, "vm", out)
         waits = GuestWaits.instant(settle_min_wait=0.0, settle_timeout=5.0, settle_interval=1.0)
         info = settle_screenshot(backend, "vm", out, waits=waits, baseline=baseline)
         assert info.settled is False
@@ -180,12 +221,13 @@ class TestSettleScreenshot:
         screen = FakeScreen()
         backend = FakeBackend(screen=screen)
         out = tmp_path / "shot.png"
-        baseline = frame_digest(backend, "vm", out)
+        baseline = capture_frame(backend, "vm", out)
         screen.bump()  # sklep się narysował
         waits = GuestWaits.instant(settle_min_wait=0.0, stable_frames=2, settle_interval=1.0)
         info = settle_screenshot(backend, "vm", out, waits=waits, baseline=baseline)
         assert info.settled is True
         assert info.changed is True
+        assert info.distance == 1.0  # nowa generacja = inny kolor całego ekranu
         assert info.frames == 2
 
     def test_changing_frames_time_out_unsettled(self, tmp_path: Path) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import time
 import uuid
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from shared.types import Sha256
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -49,18 +51,26 @@ _DEFAULT_PNG = (
 class FakeScreen:
     """Ekran gościa w pamięci: `generation` rośnie, gdy „coś się narysowało".
 
-    Klatka to `_DEFAULT_PNG` z numerem generacji wpisanym za IEND — dla
-    `settle_screenshot` liczy się tylko skrót, więc to wystarczy.
+    Klatka to prawdziwy PNG 8x8 w jednym kolorze zależnym od generacji —
+    `settle_screenshot` porównuje klatki odległością pikselową, więc kolejne
+    generacje różnią się „całym ekranem", a ta sama generacja wcale.
     """
 
     def __init__(self) -> None:
         self.generation = 0
+        self._cache: dict[int, bytes] = {}
 
     def bump(self) -> None:
         self.generation += 1
 
     def frame(self) -> bytes:
-        return _DEFAULT_PNG + self.generation.to_bytes(4, "big")
+        if self.generation not in self._cache:
+            from PIL import Image
+
+            buf = io.BytesIO()
+            Image.new("L", (8, 8), color=(self.generation * 97) % 256).save(buf, format="PNG")
+            self._cache[self.generation] = buf.getvalue()
+        return self._cache[self.generation]
 
 
 class FakeBackend:
@@ -232,7 +242,9 @@ class FakeShell:
         return ""
 
 
-def fake_shell_factory(shell: FakeShell | None = None, *, screen: FakeScreen | None = None) -> Any:
+def fake_shell_factory(
+    shell: FakeShell | None = None, *, screen: FakeScreen | None = None
+) -> Callable[[Any, Any], FakeShell]:
     """Fabryka `GuestShell` dla testów: zawsze ten sam `FakeShell` (albo świeży na `screen`)."""
     instance = shell if shell is not None else FakeShell(screen=screen)
 

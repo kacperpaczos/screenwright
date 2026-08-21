@@ -85,4 +85,45 @@ Software Repositories?" przykrywa stronę — oba do załatwienia w golden image
 driverze (`org.gnome.software show-nonfree-prompt=false`, wyjście z
 przeglądu), nie blokują pomiaru.
 
-_(sekcje „Pomiar bazowy" i „Warm cache" — uzupełniane w miarę wyników)_
+## Pomiar bazowy — Fedora WS, 2026-08-22 (zimny boot, bez warm cache)
+
+`python -m cli matrix --spec <fedora-ws, 2 aplikacje> --execute --backend virsh`
+(raport: `vm/reports/baseline-ws.json`, gitignored; klon 4096 MiB / 2 vCPU;
+`gnome-software` uruchamiany przez SSH jako `--quit` + `--details=<id>`).
+
+| Faza | Sekundy | Udział w `run_total` |
+| --- | ---: | ---: |
+| `create_overlay` | 0.05 | 0.1 % |
+| `create` (`virsh create`) | 0.86 | 1.6 % |
+| `wait_agent` | 11.24 | 21.2 % |
+| `wait_shell` (SSH) | 1.22 | 2.3 % |
+| `wait_session` (`graphical-session.target`) | 3.20 | 6.0 % |
+| **`boot` razem** | **16.52** | **31.2 %** |
+| `launch` kcalc (`--quit` 3.3 s + `--details`) | 3.74 | 7.1 % |
+| `settle` kcalc (4 klatki) | 3.31 | 6.2 % |
+| `launch` GIMP | 0.47 | 0.9 % |
+| `settle` GIMP (27 klatek) | 28.42 | 53.6 % |
+| `verify` ×2 | 0.22 | 0.4 % |
+| `teardown` | 0.25 | 0.5 % |
+| **`run_total`** | **52.99** | 100 % |
+
+Hipoteza **obalona**: boot to 31 %, a render sklepu (`launch` + `settle`) 68 %.
+Warm cache sam z siebie zdejmuje więc najwyżej ~16 s z 53 s (i dokłada ~6 s
+restore + czekanie) — daleko od celu „≥3×". Dźwignią jest render:
+`gnome-software` startuje na zimno przy **każdej** aplikacji, bo driver robi
+`--quit` przed `--details`. Dwie konsekwencje do decyzji na Bramce A:
+
+1. **driver GNOME Software bez `--quit`** — `--details` na działającej
+   instancji tylko przełącza stronę (sekundy zamiast ~30 s);
+2. **szablon warm z już uruchomionym sklepem** — save po pierwszym renderze
+   sklepu, wtedy każda aplikacja to nawigacja, nie zimny start.
+
+Uwaga do `settle` kcalc: 3.3 s i „changed", a zrzut pokazuje goły przegląd
+GNOME — „zmianą" względem klatki bazowej był **przeskok zegara w górnym pasku**
+(minuta), nie sklep. Skrót pliku jest za czuły; od tej pory klatki są
+porównywane odległością pikselową (PIL): „zmiana" = > 2 % pikseli,
+„stabilne" = < 0.1 % (`GuestWaits.change_threshold` / `stable_threshold`).
+Porównanie z szablonem dalej nic nie mówi (tu brak szablonów: `passed=False,
+score=0`).
+
+_(sekcja „Warm cache" — po kroku 9)_
