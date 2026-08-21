@@ -23,5 +23,8 @@ class DiscoverDriver:
             ["plasma-discover", f"--application=appstream:{app}"],
         ]
 
+    def warmup_commands(self) -> list[list[str]]:
+        return [["plasma-discover"]]
+
 
 __all__ = ["DiscoverDriver"]

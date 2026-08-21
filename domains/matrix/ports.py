@@ -29,7 +29,16 @@ class StoreDriver(Protocol):
     distro: DistroName
 
     def commands_for(self, app: AppId) -> list[list[str]]:
-        """Lista komend do wykonania przez qemu-guest-agent."""
+        """Komendy otwierające stronę aplikacji — wykonywane w sesji użytkownika (``GuestShell``)."""
+        ...
+
+    def warmup_commands(self) -> list[list[str]]:
+        """Komendy stawiające sklep na ekranie głównym, bez konkretnej aplikacji.
+
+        Warm cache odpala je **przed** ``virsh save``, żeby w szablonie sklep był
+        już uruchomiony i wyrenderowany: po restore każda aplikacja to nawigacja
+        (sekundy), nie zimny start (~45 s). ``[]`` = bez rozgrzewki.
+        """
         ...
 
 

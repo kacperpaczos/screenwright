@@ -203,6 +203,7 @@ def execute(
                 else:
                     log_entry(30, "matrix.warm.busy", distro=distro_label)
 
+            driver = (drivers or {}).get(distro.name)
             clone: _Clone | None = None
             if not spec.dry_run:
                 clone = _bring_up(
@@ -211,11 +212,11 @@ def execute(
                     distro,
                     work_root=work_root,
                     warm_cache=warm_here,
+                    warmup=driver.warmup_commands() if driver is not None else [],
                     waits=waits,
                     timings=timings,
                 )
 
-            driver = (drivers or {}).get(distro.name)
             try:
                 for app in spec.apps:
                     actual = (
@@ -438,11 +439,15 @@ def _build_template(
     warm_cache: WarmCache,
     *,
     work_root: Path,
+    warmup: list[list[str]],
     waits: GuestWaits,
     timings: list[PhaseTiming],
 ) -> _Clone:
-    """Zimny boot na dysku szablonu → ``save`` → zamrożenie → ``restore`` ze świeżego overlaya.
+    """Zimny boot na dysku szablonu → rozgrzewka sklepu → ``save`` → zamrożenie → ``restore``.
 
+    ``warmup`` (``StoreDriver.warmup_commands()``) stawia sklep na ekranie
+    głównym i czekamy, aż się narysuje, zanim zapiszemy stan — po restore każda
+    aplikacja to nawigacja w działającym sklepie, nie zimny start.
     ``save`` gasi domenę, więc przebieg i tak musi przejść przez ``restore`` —
     dzięki temu pierwszy przebieg sprawdza tę samą ścieżkę, co każdy następny.
     Gdy ``save`` nie wyjdzie, jedziemy dalej na działającym zimnym klonie bez
@@ -471,8 +476,15 @@ def _build_template(
     )
     try:
         with _timed(timings, label, None, "warm_save") as detail:
-            quiet = settle_screenshot(backend, name, directory / "ready.png", waits=waits)
+            ready_png = directory / "ready.png"
+            baseline: Frame | None = None
+            if warmup:
+                baseline = capture_frame(backend, name, ready_png)
+                launch(clone.shell, warmup, waits=waits)
+            quiet = settle_screenshot(backend, name, ready_png, waits=waits, baseline=baseline)
+            detail["warmup"] = len(warmup)
             detail["settled"] = quiet.settled
+            detail["changed"] = quiet.changed
             backend.save(name, directory / STATE_NAME)
     except Exception as exc:
         log_entry(30, "matrix.warm.save_failed", distro=label, error=str(exc))
@@ -499,6 +511,7 @@ def _bring_up(
     *,
     work_root: Path,
     warm_cache: WarmCache | None,
+    warmup: list[list[str]],
     waits: GuestWaits,
     timings: list[PhaseTiming],
 ) -> _Clone:
@@ -517,6 +530,7 @@ def _bring_up(
             distro,
             warm_cache,
             work_root=work_root,
+            warmup=warmup,
             waits=waits,
             timings=timings,
         )

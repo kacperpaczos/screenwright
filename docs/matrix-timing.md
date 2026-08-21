@@ -126,4 +126,68 @@ porównywane odległością pikselową (PIL): „zmiana" = > 2 % pikseli,
 Porównanie z szablonem dalej nic nie mówi (tu brak szablonów: `passed=False,
 score=0`).
 
-_(sekcja „Warm cache" — po kroku 9)_
+## Warm cache — Fedora WS, 2026-08-22 (`--execute --backend virsh`, domyślny warm root)
+
+Dwa przebiegi z tym samym specem (2 aplikacje). Pierwszy buduje szablon
+(`warm: build`), drugi w niego trafia (`warm: hit`). Raporty: `vm/reports/warm-ws-{1,2}.json`.
+
+| Faza | run 1 (build) | run 2 (hit) | baseline (cold) |
+| --- | ---: | ---: | ---: |
+| `create_overlay` | 0.06 | 0.01 | 0.05 |
+| `create` | 0.81 | — | 0.86 |
+| `wait_agent` | 11.26 (+0.0 po restore) | 0.04 | 11.24 |
+| `wait_shell` | 1.60 | 0.21 | 1.22 |
+| `wait_session` | 3.54 | 0.21 | 3.20 |
+| `warm_save` (settle + `virsh save`) | 7.17 | — | — |
+| `warm_restore` (`restore --xml`) | 4.05 | 2.71 | — |
+| **`boot` razem** | **21.25** | **3.16** | **16.52** |
+| `launch` ×2 | 1.34 | 1.74 | 4.21 |
+| `settle` ×2 | 128.91 (2× limit, bez zmiany) | 127.65 (121 bez zmiany + 6.5 OK) | 31.73 |
+| `run_total` | 159.4 | 132.9 | 53.0 |
+
+Wnioski:
+
+- **Ścieżka warm działa i jest tania**: trafienie to 3.2 s do gotowej sesji
+  (restore 2.7 s + agent/SSH/sesja 0.45 s) zamiast 16.5 s zimnego bootu —
+  ~5× na samym boocie; budowa szablonu kosztuje jednorazowo ~5 s ponad zimny
+  boot (save 4 s + restore 4 s; plik stanu ~1 GB zstd).
+- **Ale sklep po restore rysuje pierwsze okno dopiero po >120 s** (w zimnym
+  boocie ~45 s): w obu przebiegach `settle` kcalc doszedł do limitu bez zmiany
+  ekranu (dystans 0.0001 = zegar), a dopiero launch GIMP-a — ~122 s po
+  pierwszym `--details` — dostał okno w 6.5 s. Strona GIMP-a była poprawna
+  (z tym samym modalem). Przyczyna w trakcie badania (sonda po restore:
+  mapowanie nowego okna, stderr `gnome-software`, journal).
+- Netto run 2 jest **wolniejszy** od baseline (133 s vs 53 s) wyłącznie przez
+  limit `settle`; po naprawie startu sklepu po restore spodziewany czas
+  przebiegu 2-aplikacyjnego ≈ 3 s + 2×(launch + render).
+
+## Sonda po restore — Fedora WS, 2026-08-22
+
+Szablon z run 1 przywrócony ręcznie (`restore --xml` 2.9 s, gotowość 0.4 s);
+zegar gościa 279 s za hostem (tyle, ile minęło od `save`).
+
+| Krok | Wynik |
+| --- | --- |
+| `systemd-run --user -- gnome-calculator` | okno na ekranie po 3 s (dystans 0.19) — **nowe okna mapują się po restore normalnie** |
+| `systemd-run --user --wait --pipe -- gnome-software --details=org.gimp.GIMP` | wraca po 0.2 s, pusto — akcja przekazana do **wznowionej instancji autostartu** (`gnome-software.service`, PID 2398, `--gapplication-service`, „active since" = start sesji szablonu) |
+| ekran po `--details` | bez zmiany po 10 s, **okno sklepu po 20–30 s** (dystans 0.34) |
+
+Wniosek: po restore sklep działa, a w przebiegach warm zgubiło start
+**`--quit` tuż przed `--details`** w `GnomeSoftwareDriver`: `systemd-run --wait`
+czeka na klienta `--quit` (0.1 s), nie na zgon instancji; `--details` trafia
+do umierającego procesu i przepada. W zimnym boocie to samo `--quit` trwało
+3.3 s (instancja autostartu jeszcze się nie zarejestrowała), więc wyścig nie
+wychodził — za to każda aplikacja płaciła zimny start sklepu (~30–45 s).
+
+Decyzje (wdrożone):
+
+1. **`GnomeSoftwareDriver` bez `--quit`** — `--details` na działającej instancji
+   przełącza stronę; bez instancji staje się nią sam.
+2. **Rozgrzewka sklepu w szablonie**: `StoreDriver.warmup_commands()`
+   (`gnome-software` / `plasma-discover` / `snap-store`) uruchamiane przed
+   `virsh save`, z czekaniem na zmianę ekranu — w szablonie sklep jest już
+   wyrenderowany, po restore każda aplikacja to nawigacja.
+
+Pomiar po zmianach — niżej.
+
+_(sekcja „Pomiar po poprawkach" — w trakcie)_

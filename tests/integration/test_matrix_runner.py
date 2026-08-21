@@ -190,6 +190,9 @@ class TestMatrixRunner:
             def commands_for(self, app: str) -> list[list[str]]:
                 return [["broken-store-command"]]
 
+            def warmup_commands(self) -> list[list[str]]:
+                return []
+
         spec = MatrixRunSpec(
             apps=["org.kde.kcalc"],  # type: ignore[arg-type]
             distros=[_distro(DistroName.FEDORA_KDE)],
@@ -213,6 +216,9 @@ class TestMatrixRunner:
         class _FailingDriver:
             def commands_for(self, app: str) -> list[list[str]]:
                 return [["broken-store-command"]]
+
+            def warmup_commands(self) -> list[list[str]]:
+                return []
 
         spec = MatrixRunSpec(
             apps=["org.kde.kcalc"],  # type: ignore[arg-type]
@@ -246,6 +252,9 @@ class TestMatrixRunner:
         class _FailingDriver:
             def commands_for(self, app: str) -> list[list[str]]:
                 return [["broken-store-command"]]
+
+            def warmup_commands(self) -> list[list[str]]:
+                return []
 
         backend = FakeBackend(raise_on={"destroy"})
         shell = FakeShell(raise_on_command={"broken-store-command"})
@@ -538,6 +547,9 @@ class TestGuestSession:
             def commands_for(self, app: str) -> list[list[str]]:
                 return [["store", "--quit"], ["store", "--refresh"], ["store", f"--details={app}"]]
 
+            def warmup_commands(self) -> list[list[str]]:
+                return []
+
         shell = FakeShell()
         self._run(tmp_path, FakeBackend(), shell, driver=_ThreeStep())
         launches = [c for c in shell.calls if c[:1] == ["systemd-run"]]
@@ -754,6 +766,27 @@ class TestWarmCache:
         assert phases.index("warm_save") < phases.index("warm_restore")
         create = next(t for t in report.timings if t.phase == "create")  # type: ignore[attr-defined]
         assert create.detail["warm"] == "build"
+
+    def test_build_warms_up_the_store_before_save(self, tmp_path: Path) -> None:
+        screen = FakeScreen()
+        backend, shell = FakeBackend(screen=screen), FakeShell(screen=screen)
+        execute(
+            self._spec(tmp_path),
+            backend=backend,
+            matcher=_default_matcher(),
+            drivers={DistroName.FEDORA_KDE: DiscoverDriver()},
+            work_root=tmp_path / "work",
+            shell_factory=fake_shell_factory(shell),
+            warm_root=tmp_path / "warm",
+        )
+        launches = [c for c in shell.calls if c[:1] == ["systemd-run"]]
+        assert launches[0][-1] == "plasma-discover", "rozgrzewka: sklep bez aplikacji, przed save"
+        assert launches[1][-1] == "--application=appstream:org.kde.kcalc"
+        # ekran po rozgrzewce zmienił się (FakeScreen podbity) i dopiero wtedy był save
+        save_call = next(c for c in backend.calls if c.method == "save")
+        assert screen.generation >= 1
+        assert save_call.args[0] == "sw-fedora-kde-warm"
+        assert (tmp_path / "warm" / "fedora-kde" / "ready.png").exists()
 
     def test_second_run_hits_template_and_skips_boot(self, tmp_path: Path) -> None:
         self._run(tmp_path, FakeBackend())
@@ -996,6 +1029,9 @@ class TestStoreProxyIntegration:
 
             def commands_for(self, app):  # type: ignore[override]
                 return [["broken-store-command"]]
+
+            def warmup_commands(self) -> list[list[str]]:
+                return []
 
         proxy = _FakeProxy()
         spec = MatrixRunSpec(

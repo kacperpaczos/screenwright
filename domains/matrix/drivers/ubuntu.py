@@ -62,6 +62,9 @@ class UbuntuDriver:
             ["xdg-open", f"snap://{snap_name}"],
         ]
 
+    def warmup_commands(self) -> list[list[str]]:
+        return [["snap-store"]]
+
     def preflight_check(self, backend: LibvirtBackend, domain: str) -> str:
         """Sprawdź czy snap-store jest zainstalowany w VM. Zwraca stdout."""
         return backend.qemu_agent_exec(domain, ["snap", "list", "snap-store"], timeout=15.0)

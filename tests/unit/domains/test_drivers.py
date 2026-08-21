@@ -20,6 +20,9 @@ class TestDiscoverDriver:
         cmds = DiscoverDriver().commands_for("org.kde.kcalc")
         assert cmds == [["plasma-discover", "--application=appstream:org.kde.kcalc"]]
 
+    def test_warmup_opens_discover(self) -> None:
+        assert DiscoverDriver().warmup_commands() == [["plasma-discover"]]
+
     def test_no_quit_option(self) -> None:
         """plasma-discover nie ma --quit (zwraca 1), a guest-exec traktuje
         niezerowy kod jako błąd — jedna taka komenda wysadziłaby przebieg."""
@@ -31,12 +34,13 @@ class TestGnomeSoftwareDriver:
     def test_distro(self) -> None:
         assert GnomeSoftwareDriver.distro == DistroName.FEDORA_WS
 
-    def test_commands_quit_then_details(self) -> None:
-        cmds = GnomeSoftwareDriver().commands_for("org.gimp.GIMP")
-        assert cmds == [
-            ["gnome-software", "--quit"],
-            ["gnome-software", "--details=org.gimp.GIMP"],
-        ]
+    def test_commands_navigate_without_quit(self) -> None:
+        """`--quit` przed `--details` robił zimny start per aplikacja i gubił start po restore."""
+        cmds = GnomeSoftwareDriver().commands_for("org.gimp.GIMP")  # type: ignore[arg-type]
+        assert cmds == [["gnome-software", "--details=org.gimp.GIMP"]]
+
+    def test_warmup_opens_the_store_main_window(self) -> None:
+        assert GnomeSoftwareDriver().warmup_commands() == [["gnome-software"]]
 
 
 class TestUbuntuDriver:
@@ -66,3 +70,12 @@ class TestAppCenterDriver:
 
 
 __all__ = []
+
+
+class TestWarmupDefaults:
+    def test_ubuntu_warms_up_snap_store(self) -> None:
+        assert UbuntuDriver().warmup_commands() == [["snap-store"]]
+
+    def test_unsupported_drivers_have_no_warmup(self) -> None:
+        assert MintInstallDriver().warmup_commands() == []
+        assert AppCenterDriver().warmup_commands() == []

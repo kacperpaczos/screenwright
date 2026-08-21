@@ -34,5 +34,8 @@ class MintInstallDriver:
         )
         return []
 
+    def warmup_commands(self) -> list[list[str]]:
+        return []
+
 
 __all__ = ["MintInstallDriver"]
