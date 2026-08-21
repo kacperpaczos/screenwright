@@ -148,7 +148,7 @@ def execute(
         if not spec.dry_run and store_proxy_provider is not None:
             proxy = store_proxy_provider(distro, spec.apps)
             if proxy is not None:
-                proxy.start()
+                _start_store_proxy(proxy, distro.name)
 
         if not spec.dry_run:
             backend.create_overlay(distro.golden_image, disk_path)
@@ -195,6 +195,26 @@ def execute(
         started_at=started_at,
         finished_at=datetime.now(UTC),
         results=results,
+    )
+
+
+STORE_PROXY_READY_TIMEOUT = 20.0
+"""Ile czekać, aż proxy sklepu odpowie na health-check, zanim uznamy przebieg za niewykonalny."""
+
+
+def _start_store_proxy(proxy: StoreProxyLifecycle, distro: DistroName) -> None:
+    """Start + czekanie na gotowość. Wołane PRZED tworzeniem overlaya i domeny.
+
+    Jeśli proxy nie wstanie, gasimy je i rzucamy — nie ma sensu bootować VM-ki
+    pod test, który z założenia pójdzie w pustkę. Teardown domeny nie jest tu
+    potrzebny, bo domena jeszcze nie istnieje.
+    """
+    proxy.start()
+    if proxy.wait_ready(STORE_PROXY_READY_TIMEOUT):
+        return
+    proxy.stop()
+    raise RuntimeError(
+        f"store proxy for {distro.value} did not become ready within {STORE_PROXY_READY_TIMEOUT:g}s"
     )
 
 

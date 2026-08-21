@@ -139,14 +139,18 @@ class TestExitCodes:
         assert run_matrix_execute(_args(spec_path, execute=True, output=str(out))) == 2
         assert not out.exists()
 
-    def test_execute_runs_when_spec_dry_run_false(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        spec_path = _write_spec(tmp_path, {**_VALID_SPEC, "dry_run": False})
+    def test_execute_runs_when_spec_dry_run_false(self, tmp_path: Path) -> None:
+        # Bez store_proxy: _VALID_SPEC wpiąłby prawdziwy StoreProxyServer (uvicorn),
+        # a tu sprawdzamy tylko, że blokada NIE zadziałała.
+        spec_path = _write_spec(
+            tmp_path,
+            {
+                "apps": ["org.kde.kcalc"],
+                "distros": [{"name": "fedora-kde", "golden_image": "/tmp/x.qcow2"}],
+                "dry_run": False,
+            },
+        )
         out = tmp_path / "reports" / "matrix.json"
-        # FakeBackend + work_root: runner domyślnie pisze overlay do /tmp/screenwright-matrix;
-        # tu nie chodzi o overlay, tylko o to, że blokada NIE zadziałała.
-        monkeypatch.chdir(tmp_path)
         assert run_matrix_execute(_args(spec_path, execute=True, output=str(out))) == 0
         report = json.loads(out.read_text(encoding="utf-8"))
         assert report["results"]

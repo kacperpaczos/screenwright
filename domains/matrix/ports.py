@@ -40,11 +40,19 @@ class ReporterSink(Protocol):
 
 @runtime_checkable
 class StoreProxyLifecycle(Protocol):
-    """Adapter cyklu życia snap-store-proxy (lub innego) — start/stop per distro."""
+    """Adapter cyklu życia snap-store-proxy (lub innego) — start/stop per distro.
+
+    ``start()`` tylko odpala proces; ``wait_ready(timeout)`` blokuje, aż proxy
+    faktycznie odpowiada, i zwraca ``False`` po upływie limitu (albo gdy proces
+    zgasł). Runner nie bootuje VM-ki, dopóki ``wait_ready`` nie zwróci ``True``
+    — inaczej pierwsze zapytanie sklepu trafia w zamknięty port i test
+    przechodzi albo pada zależnie od tego, kto był szybszy.
+    """
 
     url: str
 
     def start(self) -> None: ...
+    def wait_ready(self, timeout: float) -> bool: ...
     def stop(self) -> None: ...
 
 

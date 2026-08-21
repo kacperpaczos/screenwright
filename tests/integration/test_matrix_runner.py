@@ -442,7 +442,6 @@ class TestStoreProxyIntegration:
         assert provider.calls == [("ubuntu-24.04", ["org.kde.kcalc"])]
 
     def test_provider_returns_proxy_start_and_stop_called(self, tmp_path: Path) -> None:
-
         class _FakeProxy:
             def __init__(self) -> None:
                 self.url = "http://127.0.0.1:8900"
@@ -450,6 +449,10 @@ class TestStoreProxyIntegration:
 
             def start(self) -> None:
                 self.events.append("start")
+
+            def wait_ready(self, timeout: float) -> bool:
+                self.events.append("wait_ready")
+                return True
 
             def stop(self) -> None:
                 self.events.append("stop")
@@ -473,7 +476,81 @@ class TestStoreProxyIntegration:
             store_proxy_provider=provider,
             work_root=tmp_path,
         )
-        assert proxy.events == ["start", "stop"]
+        assert proxy.events == ["start", "wait_ready", "stop"]
+
+    def test_proxy_readiness_is_awaited_before_any_backend_call(self, tmp_path: Path) -> None:
+        """Przed `wait_ready()` runner nie ma prawa tknąć backendu.
+
+        Inaczej VM bootuje się równolegle ze startem proxy i pierwsze żądanie
+        sklepu ściga się z uvicornem — test przechodzi albo pada losowo.
+        """
+        backend = FakeBackend()
+        seen_at_ready: list[int] = []
+
+        class _FakeProxy:
+            url = "http://x"
+
+            def start(self) -> None:
+                pass
+
+            def wait_ready(self, timeout: float) -> bool:
+                seen_at_ready.append(len(backend.calls))
+                return True
+
+            def stop(self) -> None:
+                pass
+
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[DistroSpec(name=DistroName.UBUNTU, golden_image=tmp_path / "g.qcow2")],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            store_proxy_provider=lambda _d, _a: _FakeProxy(),
+            work_root=tmp_path,
+        )
+        assert seen_at_ready == [0]
+        assert backend.calls, "po gotowości proxy przebieg ma normalnie bootować VM"
+
+    def test_proxy_not_ready_stops_proxy_and_skips_backend(self, tmp_path: Path) -> None:
+        class _NeverReadyProxy:
+            url = "http://x"
+
+            def __init__(self) -> None:
+                self.events: list[str] = []
+
+            def start(self) -> None:
+                self.events.append("start")
+
+            def wait_ready(self, timeout: float) -> bool:
+                self.events.append("wait_ready")
+                return False
+
+            def stop(self) -> None:
+                self.events.append("stop")
+
+        proxy = _NeverReadyProxy()
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[DistroSpec(name=DistroName.UBUNTU, golden_image=tmp_path / "g.qcow2")],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        backend = FakeBackend()
+        with pytest.raises(RuntimeError, match="did not become ready"):
+            execute(
+                spec,
+                backend=backend,
+                matcher=_default_matcher(),
+                store_proxy_provider=lambda _d, _a: proxy,
+                work_root=tmp_path,
+            )
+        assert proxy.events == ["start", "wait_ready", "stop"]
+        assert backend.calls == []
 
     def test_proxy_stop_called_even_when_driver_fails(self, tmp_path: Path) -> None:
         """driver rzuca wyjątek → proxy.stop() mimo to (finally)."""
@@ -484,6 +561,10 @@ class TestStoreProxyIntegration:
 
             def start(self) -> None:
                 self.events.append("start")
+
+            def wait_ready(self, timeout: float) -> bool:
+                self.events.append("wait_ready")
+                return True
 
             def stop(self) -> None:
                 self.events.append("stop")
@@ -513,7 +594,7 @@ class TestStoreProxyIntegration:
                 store_proxy_provider=lambda _d, _a: proxy,
                 work_root=tmp_path,
             )
-        assert proxy.events == ["start", "stop"]
+        assert proxy.events == ["start", "wait_ready", "stop"]
 
     def test_dry_run_does_not_invoke_provider(self, tmp_path: Path) -> None:
         from domains.matrix.ports import StoreProxyLifecycle
