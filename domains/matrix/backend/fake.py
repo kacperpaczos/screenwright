@@ -53,6 +53,14 @@ class FakeBackend:
     - `screenshot_bytes` to zawartość zwracana przez screenshot() (PNG 1x1).
     - `agent_output` to dict komenda -> stdout (domyślnie "").
     - `raise_on` to set nazw metod, które rzucają RuntimeError (symulacja błędu).
+    - `raise_on_command` to set tokenów argv: `qemu_agent_exec` z komendą
+      zawierającą którykolwiek rzuca RuntimeError (padł konkretny program w
+      gościu, nie cały agent).
+    - `agent_fail_first` — tyle pierwszych wywołań `qemu_agent_exec` rzuca
+      (agent jeszcze nie wstał); próby są zapisywane w `calls`, żeby test mógł
+      policzyć retry.
+    - Fake udaje zbootowanego gościa: bez wpisu w `agent_output` probe
+      `systemctl --user is-active …` odpowiada `active`, a `id -u <user>` — `1000`.
     - `create_overlay` tworzy pusty plik w `overlay`, żeby dalszy kod mógł
       sprawdzić cleanup tak samo jak na produkcji.
     """
@@ -63,10 +71,14 @@ class FakeBackend:
         screenshot_bytes: bytes | None = None,
         agent_output: dict[str, str] | None = None,
         raise_on: set[str] | None = None,
+        raise_on_command: set[str] | None = None,
+        agent_fail_first: int = 0,
     ) -> None:
         self._screenshot_bytes = screenshot_bytes if screenshot_bytes is not None else _DEFAULT_PNG
         self._agent_output = agent_output or {}
         self._raise_on = raise_on or set()
+        self._raise_on_command = raise_on_command or set()
+        self._agent_failures_left = agent_fail_first
         self._domains: dict[str, DomainState] = {}
         self._overlays: dict[Path, OverlayState] = {}
         self._states: dict[Path, str] = {}
@@ -144,8 +156,19 @@ class FakeBackend:
 
     def qemu_agent_exec(self, name: str, command: list[str], timeout: float = 30.0) -> str:
         self._record("qemu_agent_exec", name, command, timeout)
+        if self._agent_failures_left > 0:
+            self._agent_failures_left -= 1
+            raise RuntimeError(f"guest-exec on {name} failed: Guest agent is not responding")
+        if self._raise_on_command & set(command):
+            raise RuntimeError(f"guest-exec failed (exitcode=127) on {name}: {' '.join(command)}")
         key = " ".join(command)
-        return self._agent_output.get(key, "")
+        if key in self._agent_output:
+            return self._agent_output[key]
+        if "is-active" in command:
+            return "active"
+        if command[:2] == ["id", "-u"]:
+            return "1000"
+        return ""
 
 
 def compute_screenshot_hash(payload: bytes) -> Sha256:

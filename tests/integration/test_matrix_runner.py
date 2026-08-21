@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from domains.matrix.backend.fake import FakeBackend
 from domains.matrix.drivers import DiscoverDriver
+from domains.matrix.guest import GuestWaits
 from domains.matrix.models import DistroName, DistroSpec, MatrixRunSpec
 from domains.matrix.runner import _default_matcher, _teardown, _timed, execute, plan
 from pydantic import ValidationError
@@ -139,12 +140,13 @@ class TestMatrixRunner:
             dry_run=False,
             output_dir=tmp_path,
         )
-        backend = FakeBackend(raise_on={"qemu_agent_exec"})
-        # Nie powinno rzucić — brak drivera = brak wywołań qemu_agent_exec.
+        backend = FakeBackend()
+        # Brak drivera = brak komend sklepu; agent jest używany tylko do sprawdzenia gotowości.
         report = execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
         assert len(report.results) == 1
-        methods = {c.method for c in backend.calls}
-        assert "qemu_agent_exec" not in methods
+        launched = [c.args[1] for c in backend.calls if c.method == "qemu_agent_exec"]
+        assert launched, "gotowość gościa ma być sprawdzona przez agenta"
+        assert not any("systemd-run" in cmd for cmd in launched)
 
     def test_driver_failure_still_destroys_domain(self, tmp_path: Path) -> None:
         """Wyjątek z qemu_agent_exec nie może zostawić działającej VM.
@@ -163,7 +165,7 @@ class TestMatrixRunner:
             dry_run=False,
             output_dir=tmp_path,
         )
-        backend = FakeBackend(raise_on={"qemu_agent_exec"})
+        backend = FakeBackend(raise_on_command={"broken-store-command"})
         with pytest.raises(RuntimeError):
             execute(
                 spec,
@@ -185,7 +187,7 @@ class TestMatrixRunner:
             dry_run=False,
             output_dir=tmp_path,
         )
-        backend = FakeBackend(raise_on={"qemu_agent_exec"})
+        backend = FakeBackend(raise_on_command={"broken-store-command"})
         with pytest.raises(RuntimeError):
             execute(
                 spec,
@@ -210,7 +212,7 @@ class TestMatrixRunner:
             def commands_for(self, app: str) -> list[list[str]]:
                 return [["broken-store-command"]]
 
-        backend = FakeBackend(raise_on={"qemu_agent_exec", "destroy"})
+        backend = FakeBackend(raise_on={"destroy"}, raise_on_command={"broken-store-command"})
         with pytest.raises(RuntimeError):
             execute(
                 spec,
@@ -414,6 +416,106 @@ class TestDomainOverrides:
         assert backend.calls == []
 
 
+class TestGuestSession:
+    """Runner ma czekać na gościa i odpalać sklep w sesji użytkownika, nie jako root bez DISPLAY."""
+
+    def _agent_commands(self, backend: FakeBackend) -> list[list[str]]:
+        return [c.args[1] for c in backend.calls if c.method == "qemu_agent_exec"]
+
+    def _run(
+        self,
+        tmp_path: Path,
+        backend: FakeBackend,
+        *,
+        driver: object | None = None,
+        guest_user: str = "test",
+        waits: GuestWaits | None = None,
+    ) -> None:
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[
+                DistroSpec(
+                    name=DistroName.FEDORA_KDE,
+                    golden_image=tmp_path / "g.qcow2",
+                    guest_user=guest_user,
+                )
+            ],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        execute(
+            spec,
+            backend=backend,
+            matcher=_default_matcher(),
+            drivers={DistroName.FEDORA_KDE: driver} if driver is not None else None,  # type: ignore[dict-item]
+            work_root=tmp_path,
+            waits=waits,
+        )
+
+    def test_launch_commands_are_wrapped_in_user_session(self, tmp_path: Path) -> None:
+        backend = FakeBackend()
+        self._run(tmp_path, backend, driver=DiscoverDriver())
+        launches = [c for c in self._agent_commands(backend) if "systemd-run" in c]
+        assert len(launches) == 1
+        (cmd,) = launches
+        assert cmd[:4] == ["runuser", "-u", "test", "--"]
+        assert "XDG_RUNTIME_DIR=/run/user/1000" in cmd
+        assert cmd[-2:] == ["plasma-discover", "--application=appstream:org.kde.kcalc"]
+        assert "--wait" not in cmd
+
+    def test_all_but_last_driver_command_get_wait(self, tmp_path: Path) -> None:
+        class _ThreeStep:
+            distro = DistroName.FEDORA_KDE
+
+            def commands_for(self, app: str) -> list[list[str]]:
+                return [["store", "--quit"], ["store", "--refresh"], ["store", f"--details={app}"]]
+
+        backend = FakeBackend()
+        self._run(tmp_path, backend, driver=_ThreeStep())
+        launches = [c for c in self._agent_commands(backend) if "systemd-run" in c]
+        assert ["--wait" in c for c in launches] == [True, True, False]
+        assert [c[-1] for c in launches] == ["--quit", "--refresh", "--details=org.kde.kcalc"]
+
+    def test_readiness_precedes_launch(self, tmp_path: Path) -> None:
+        backend = FakeBackend()
+        self._run(tmp_path, backend, driver=DiscoverDriver())
+        cmds = self._agent_commands(backend)
+        kinds = [
+            "ping"
+            if c == ["true"]
+            else "uid"
+            if c[:2] == ["id", "-u"]
+            else "probe"
+            if "is-active" in c
+            else "launch"
+            if "systemd-run" in c
+            else "?"
+            for c in cmds
+        ]
+        assert kinds == ["ping", "uid", "probe", "launch"]
+        methods = [c.method for c in backend.calls]
+        assert (
+            methods.index("create") < methods.index("qemu_agent_exec") < methods.index("screenshot")
+        )
+
+    def test_guest_user_from_spec_is_used(self, tmp_path: Path) -> None:
+        backend = FakeBackend(agent_output={"id -u kacper": "1234"})
+        self._run(tmp_path, backend, driver=DiscoverDriver(), guest_user="kacper")
+        cmds = self._agent_commands(backend)
+        assert ["id", "-u", "kacper"] in cmds
+        launch = next(c for c in cmds if "systemd-run" in c)
+        assert launch[:3] == ["runuser", "-u", "kacper"]
+        assert "XDG_RUNTIME_DIR=/run/user/1234" in launch
+
+    def test_readiness_failure_still_tears_down(self, tmp_path: Path) -> None:
+        backend = FakeBackend(agent_fail_first=10**6)
+        waits = GuestWaits.instant(agent_timeout=3.0, probe_interval=1.0)
+        with pytest.raises(TimeoutError, match="guest agent"):
+            self._run(tmp_path, backend, driver=DiscoverDriver(), waits=waits)
+        assert "destroy" in {c.method for c in backend.calls}
+        assert list(tmp_path.glob("*.qcow2")) == []
+
+
 class TestTimings:
     """Raport ma mówić, gdzie schodzi czas — to jest liczba odniesienia dla Bramki A."""
 
@@ -435,11 +537,13 @@ class TestTimings:
         assert phases == [
             ("create_overlay", None),
             ("create", None),
+            ("wait_agent", None),
+            ("wait_session", None),
             ("launch", "org.kde.kcalc"),
-            ("screenshot", "org.kde.kcalc"),
+            ("settle", "org.kde.kcalc"),
             ("verify", "org.kde.kcalc"),
             ("launch", "org.gimp.GIMP"),
-            ("screenshot", "org.gimp.GIMP"),
+            ("settle", "org.gimp.GIMP"),
             ("verify", "org.gimp.GIMP"),
             ("teardown", None),
         ]
@@ -448,10 +552,22 @@ class TestTimings:
         assert all(t.seconds >= 0.0 for t in report.timings)
         launch = next(t for t in report.timings if t.phase == "launch")
         assert launch.detail["commands"] == 1
+        settle = next(t for t in report.timings if t.phase == "settle")
+        assert settle.detail["settled"] is True
+        assert settle.detail["frames"] >= 2
         totals = report.phase_totals()
-        assert {"create", "launch", "screenshot", "verify", "teardown", "boot", "run_total"} <= set(
-            totals
-        )
+        assert {
+            "create",
+            "wait_agent",
+            "wait_session",
+            "launch",
+            "settle",
+            "verify",
+            "teardown",
+            "boot",
+            "run_total",
+        } <= set(totals)
+        assert totals["boot"] == totals["create"] + totals["wait_agent"] + totals["wait_session"]
 
     def test_dry_run_records_only_what_ran(self) -> None:
         spec = _spec([_distro(DistroName.FEDORA_KDE)], ["org.kde.kcalc"])
@@ -663,7 +779,7 @@ class TestStoreProxyIntegration:
             dry_run=False,
             output_dir=tmp_path,
         )
-        backend = FakeBackend(raise_on={"qemu_agent_exec"})
+        backend = FakeBackend(raise_on_command={"broken-store-command"})
         with pytest.raises(RuntimeError):
             execute(
                 spec,

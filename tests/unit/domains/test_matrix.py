@@ -187,3 +187,45 @@ class TestDistroSpec:
                 golden_image=Path("/tmp/g.qcow2"),
                 domain_overrides={"memory_mb": 2048},
             )
+
+    def test_guest_user_defaults_to_test_and_must_be_a_unix_name(self) -> None:
+        assert _distro().guest_user == "test"
+        spec = DistroSpec(
+            name=DistroName.FEDORA_KDE, golden_image=Path("/tmp/g.qcow2"), guest_user="kacper_1"
+        )
+        assert spec.guest_user == "kacper_1"
+        with pytest.raises(ValidationError):
+            DistroSpec(
+                name=DistroName.FEDORA_KDE,
+                golden_image=Path("/tmp/g.qcow2"),
+                guest_user="Root User",
+            )
+
+
+class TestFakeBackendGuestSimulation:
+    def test_agent_fail_first_records_attempts_then_answers(self) -> None:
+        b = FakeBackend(agent_fail_first=2)
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match="not responding"):
+                b.qemu_agent_exec("v1", ["true"])
+        assert b.qemu_agent_exec("v1", ["true"]) == ""
+        assert len([c for c in b.calls if c.method == "qemu_agent_exec"]) == 3
+
+    def test_raise_on_command_hits_only_matching_argv(self) -> None:
+        b = FakeBackend(raise_on_command={"broken-store-command"})
+        assert b.qemu_agent_exec("v1", ["true"]) == ""
+        with pytest.raises(RuntimeError, match="exitcode=127"):
+            b.qemu_agent_exec("v1", ["systemd-run", "--", "broken-store-command"])
+
+    def test_default_probe_answers_simulate_booted_guest(self) -> None:
+        b = FakeBackend()
+        assert b.qemu_agent_exec("v1", ["id", "-u", "test"]) == "1000"
+        assert b.qemu_agent_exec("v1", ["systemctl", "--user", "is-active", "x.target"]) == "active"
+        assert b.qemu_agent_exec("v1", ["anything-else"]) == ""
+
+    def test_agent_output_overrides_defaults(self) -> None:
+        b = FakeBackend(
+            agent_output={"id -u test": "42", "systemctl --user is-active x": "inactive"}
+        )
+        assert b.qemu_agent_exec("v1", ["id", "-u", "test"]) == "42"
+        assert b.qemu_agent_exec("v1", ["systemctl", "--user", "is-active", "x"]) == "inactive"

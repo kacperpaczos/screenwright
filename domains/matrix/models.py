@@ -70,6 +70,12 @@ class DistroSpec(BaseModel):
     środku przebiegu.
     """
     store_proxy: Literal["snap-store"] | None = None
+    guest_user: str = Field(default="test", pattern=r"^[a-z_][a-z0-9_-]*$")
+    """Użytkownik autologowanej sesji graficznej w gościu.
+
+    Runner czeka na jego ``graphical-session.target`` i w jego sesji odpala
+    komendy sklepu. Wszystkie instalatory z ``distro_builders`` tworzą ``test``.
+    """
     seed_iso: Path | None = None
     """NoCloud seed ISO podpinane jako cdrom przy tworzeniu domeny.
 

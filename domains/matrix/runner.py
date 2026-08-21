@@ -18,6 +18,15 @@ if TYPE_CHECKING:
 
 from domains.matrix.backend.fake import FakeBackend, make_unique_name
 from domains.matrix.domain_xml import render_domain_xml
+from domains.matrix.guest import (
+    GuestSession,
+    GuestWaits,
+    resolve_session,
+    session_command,
+    settle_screenshot,
+    wait_for_agent,
+    wait_for_session,
+)
 from domains.matrix.models import (
     _MATRIX_STEP_VERBS,
     DEFAULT_DOMAIN,
@@ -116,6 +125,7 @@ def execute(
     reporter: ReporterSink | None = None,
     work_root: Path = Path("/tmp/screenwright-matrix"),
     store_proxy_provider: StoreProxyProvider | None = None,
+    waits: GuestWaits | None = None,
 ) -> MatrixReport:
     """Wykonuje przebieg matrycy. W trybie dry_run NIE wywołuje backendu.
 
@@ -128,9 +138,16 @@ def execute(
     obiekt ``StoreProxyLifecycle``, runner wywołuje ``start()`` przed pętlą
     po apps i ``stop()`` po (również przy wyjątkach). W ``dry_run`` provider
     nie jest używany — pętla mockuje brak proxy.
+
+    Po ``create`` runner czeka na agenta i na sesję graficzną
+    ``DistroSpec.guest_user`` (``domains.matrix.guest``), komendy drivera
+    odpala w tej sesji, a zrzut robi dopiero, gdy klatki przestają się
+    zmieniać. ``waits`` steruje limitami; ``None`` = ``GuestWaits.default()``.
     """
     if backend is None:
         backend = FakeBackend()
+    if waits is None:
+        waits = GuestWaits.default()
     if matcher is None:
         matcher = _build_matcher(spec.verify_threshold)
     started_at = datetime.now(UTC)
@@ -162,20 +179,28 @@ def execute(
                 backend.create(xml, name)
 
         driver = (drivers or {}).get(distro.name)
+        session: GuestSession | None = None
         try:
+            if not spec.dry_run:
+                with _timed(timings, distro_label, None, "wait_agent"):
+                    wait_for_agent(backend, name, waits=waits)
+                with _timed(timings, distro_label, None, "wait_session"):
+                    session = resolve_session(backend, name, distro.guest_user, waits=waits)
+                    wait_for_session(backend, name, session, waits=waits)
             for app in spec.apps:
                 actual = (
                     work_root / f"{name}-{app}.png" if not spec.dry_run else Path("/tmp/dry.png")
                 )
                 if not spec.dry_run:
-                    if driver is not None:
+                    if driver is not None and session is not None:
                         with _timed(timings, distro_label, app, "launch") as detail:
                             commands = driver.commands_for(app)
                             detail["commands"] = len(commands)
-                            for cmd in commands:
-                                backend.qemu_agent_exec(name, cmd)
-                    with _timed(timings, distro_label, app, "screenshot"):
-                        backend.screenshot(name, actual)
+                            _launch(backend, name, session, commands)
+                    with _timed(timings, distro_label, app, "settle") as detail:
+                        settled = settle_screenshot(backend, name, actual, waits=waits)
+                        detail["frames"] = settled.frames
+                        detail["settled"] = settled.settled
                 template = _resolve_template(spec.templates_dir, distro.name, app)
                 with _timed(timings, distro_label, app, "verify"):
                     score = matcher.match(template, actual)
@@ -245,6 +270,19 @@ def _timed(
                 detail={**detail, "ok": ok},
             )
         )
+
+
+def _launch(
+    backend: LibvirtBackend, name: str, session: GuestSession, commands: list[list[str]]
+) -> None:
+    """Komendy drivera w sesji użytkownika: wszystkie poza ostatnią z ``--wait``.
+
+    Ostatnia otwiera stronę aplikacji i zostaje na ekranie — na nią czeka
+    już ``settle_screenshot``, nie ``systemd-run``.
+    """
+    last = len(commands) - 1
+    for index, cmd in enumerate(commands):
+        backend.qemu_agent_exec(name, session_command(cmd, session, wait=index < last))
 
 
 STORE_PROXY_READY_TIMEOUT = 20.0

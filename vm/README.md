@@ -162,6 +162,22 @@ z `shared/results.py`).
 (kod 2). Żeby bootować prawdziwe maszyny, spec musi mieć `dry_run: false`
 (tak jest w `matrix-spec.json`) albo nie mieć tego klucza wcale.
 
+Co robi runner per dystrybucja (`domains/matrix/runner.py` +
+`domains/matrix/guest.py`):
+
+1. overlay na golden → `virsh create` (domena transient),
+2. czeka, aż `qemu-guest-agent` odpowiada, potem aż `graphical-session.target`
+   użytkownika `test` (`DistroSpec.guest_user`) jest `active`,
+3. komendy drivera sklepu odpala **w tej sesji**: `runuser -u test -- env
+   XDG_RUNTIME_DIR=/run/user/<uid> … systemd-run --user …` — agent działa jako
+   root bez `DISPLAY`, więc bez tego GUI nie ma się gdzie narysować,
+4. robi `virsh screenshot`, dopóki dwie kolejne klatki nie są identyczne
+   (albo mija limit), i dopiero ten zrzut porównuje,
+5. `virsh destroy` + usunięcie overlaya, także po błędzie.
+
+Każda faza ląduje w raporcie jako `timings[]` (`PhaseTiming`), a CLI wypisuje
+sumy per faza (`cli.matrix.timing_summary`).
+
 ## Save / restore (ciepły start)
 
 `VirshBackend` ma `save()` / `restore()` (`virsh save` działa dla domen
