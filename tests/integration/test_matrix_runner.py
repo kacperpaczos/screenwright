@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 from domains.matrix.backend.fake import FakeBackend
+from domains.matrix.drivers import DiscoverDriver
 from domains.matrix.models import DistroName, DistroSpec, MatrixRunSpec
-from domains.matrix.runner import _default_matcher, _teardown, execute, plan
+from domains.matrix.runner import _default_matcher, _teardown, _timed, execute, plan
 from pydantic import ValidationError
+from shared.results import PhaseTiming
 
 
 def _spec(distros: list[DistroSpec], apps: list[str]) -> MatrixRunSpec:
@@ -410,6 +412,83 @@ class TestDomainOverrides:
         with pytest.raises(ValidationError):
             execute(spec, backend=backend, matcher=_default_matcher(), work_root=tmp_path)
         assert backend.calls == []
+
+
+class TestTimings:
+    """Raport ma mówić, gdzie schodzi czas — to jest liczba odniesienia dla Bramki A."""
+
+    def test_timings_record_phases_in_order(self, tmp_path: Path) -> None:
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc", "org.gimp.GIMP"],  # type: ignore[arg-type]
+            distros=[_distro(DistroName.FEDORA_KDE)],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        report = execute(
+            spec,
+            backend=FakeBackend(),
+            matcher=_default_matcher(),
+            drivers={DistroName.FEDORA_KDE: DiscoverDriver()},
+            work_root=tmp_path,
+        )
+        phases = [(t.phase, t.app) for t in report.timings]
+        assert phases == [
+            ("create_overlay", None),
+            ("create", None),
+            ("launch", "org.kde.kcalc"),
+            ("screenshot", "org.kde.kcalc"),
+            ("verify", "org.kde.kcalc"),
+            ("launch", "org.gimp.GIMP"),
+            ("screenshot", "org.gimp.GIMP"),
+            ("verify", "org.gimp.GIMP"),
+            ("teardown", None),
+        ]
+        assert all(t.distro == "fedora-kde" for t in report.timings)
+        assert all(t.detail["ok"] is True for t in report.timings)
+        assert all(t.seconds >= 0.0 for t in report.timings)
+        launch = next(t for t in report.timings if t.phase == "launch")
+        assert launch.detail["commands"] == 1
+        totals = report.phase_totals()
+        assert {"create", "launch", "screenshot", "verify", "teardown", "boot", "run_total"} <= set(
+            totals
+        )
+
+    def test_dry_run_records_only_what_ran(self) -> None:
+        spec = _spec([_distro(DistroName.FEDORA_KDE)], ["org.kde.kcalc"])
+        report = execute(spec, backend=FakeBackend(), matcher=_default_matcher())
+        assert [t.phase for t in report.timings] == ["verify"]
+
+    def test_no_driver_means_no_launch_phase(self, tmp_path: Path) -> None:
+        spec = MatrixRunSpec(
+            apps=["org.kde.kcalc"],  # type: ignore[arg-type]
+            distros=[_distro(DistroName.ELEMENTARY)],
+            dry_run=False,
+            output_dir=tmp_path,
+        )
+        report = execute(
+            spec, backend=FakeBackend(), matcher=_default_matcher(), work_root=tmp_path
+        )
+        assert "launch" not in {t.phase for t in report.timings}
+
+    def test_timed_records_failed_phase_with_ok_false(self) -> None:
+        timings: list[PhaseTiming] = []
+        with (
+            pytest.raises(RuntimeError, match="boom"),
+            _timed(timings, "fedora-kde", None, "create"),
+        ):
+            raise RuntimeError("boom")
+        assert len(timings) == 1
+        assert isinstance(timings[0], PhaseTiming)
+        assert timings[0].phase == "create"
+        assert timings[0].detail == {"ok": False}
+        assert timings[0].seconds >= 0.0
+
+    def test_timed_lets_phase_add_detail(self) -> None:
+        timings: list[PhaseTiming] = []
+        with _timed(timings, "fedora-kde", "org.kde.kcalc", "launch") as detail:  # type: ignore[arg-type]
+            detail["commands"] = 2
+        assert timings[0].app == "org.kde.kcalc"
+        assert timings[0].detail == {"commands": 2, "ok": True}
 
 
 class TestStoreProxyIntegration:

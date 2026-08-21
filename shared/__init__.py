@@ -5,7 +5,7 @@ from shared.http_client import DEFAULT_USER_AGENT, SNAP_DEVICE_SERIES, HttpClien
 from shared.logging import get_logger, log_entry
 from shared.media import fetch_to_corpus
 from shared.pydantic_utils import construct_validated, is_test_mode, strict_validate
-from shared.results import MatrixReport, Score, ScreenshotHash, VerificationResult
+from shared.results import MatrixReport, PhaseTiming, Score, ScreenshotHash, VerificationResult
 from shared.settings import Settings, load_settings
 from shared.types import (
     AppId,
@@ -25,6 +25,7 @@ __all__ = [
     "HttpClient",
     "HttpUrl",
     "MatrixReport",
+    "PhaseTiming",
     "PkgName",
     "RelativePath",
     "Score",

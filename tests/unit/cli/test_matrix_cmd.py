@@ -132,6 +132,7 @@ class TestExitCodes:
         assert run_matrix_execute(_args(spec_path, output=str(out))) == 0
         report = json.loads(out.read_text(encoding="utf-8"))
         assert report["results"]
+        assert [t["phase"] for t in report["timings"]] == ["verify"]
 
     def test_execute_refused_when_spec_pins_dry_run(self, tmp_path: Path) -> None:
         spec_path = _write_spec(tmp_path, {**_VALID_SPEC, "dry_run": True})

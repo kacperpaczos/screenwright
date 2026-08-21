@@ -170,6 +170,11 @@ def run_matrix_execute(args: argparse.Namespace) -> int:
         MatrixReport.model_validate(report.model_dump()).model_dump_json(indent=2),
         encoding="utf-8",
     )
+    log_entry(
+        20,
+        "cli.matrix.timing_summary",
+        phases={k: round(v, 3) for k, v in report.phase_totals().items()},
+    )
     log_entry(20, "cli.matrix.execute.done", path=str(output_path), results=len(report.results))
     return 0
 

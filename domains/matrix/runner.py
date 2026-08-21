@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import shutil
 import socket
+import time
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from shared.logging import log_entry
-from shared.results import MatrixReport, Score, VerificationResult
+from shared.results import MatrixReport, PhaseTiming, Score, VerificationResult
 
 if TYPE_CHECKING:
     from shared.ports import LibvirtBackend
@@ -27,7 +29,7 @@ from domains.matrix.models import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
     from shared.types import AppId
 
@@ -134,6 +136,7 @@ def execute(
     started_at = datetime.now(UTC)
     run_id = make_unique_name("run")
     results: list[VerificationResult] = []
+    timings: list[PhaseTiming] = []
 
     if not spec.dry_run:
         work_root.mkdir(parents=True, exist_ok=True)
@@ -144,15 +147,19 @@ def execute(
         disk_path = _disk_path(work_root if not spec.dry_run else Path("/tmp/dry"), distro.name)
         xml = render_domain_xml(domain, disk_path, cdrom_path=distro.seed_iso)
 
+        distro_label = distro.name.value
         proxy: StoreProxyLifecycle | None = None
         if not spec.dry_run and store_proxy_provider is not None:
             proxy = store_proxy_provider(distro, spec.apps)
             if proxy is not None:
-                _start_store_proxy(proxy, distro.name)
+                with _timed(timings, distro_label, None, "proxy_start"):
+                    _start_store_proxy(proxy, distro.name)
 
         if not spec.dry_run:
-            backend.create_overlay(distro.golden_image, disk_path)
-            backend.create(xml, name)
+            with _timed(timings, distro_label, None, "create_overlay"):
+                backend.create_overlay(distro.golden_image, disk_path)
+            with _timed(timings, distro_label, None, "create"):
+                backend.create(xml, name)
 
         driver = (drivers or {}).get(distro.name)
         try:
@@ -162,11 +169,16 @@ def execute(
                 )
                 if not spec.dry_run:
                     if driver is not None:
-                        for cmd in driver.commands_for(app):
-                            backend.qemu_agent_exec(name, cmd)
-                    backend.screenshot(name, actual)
+                        with _timed(timings, distro_label, app, "launch") as detail:
+                            commands = driver.commands_for(app)
+                            detail["commands"] = len(commands)
+                            for cmd in commands:
+                                backend.qemu_agent_exec(name, cmd)
+                    with _timed(timings, distro_label, app, "screenshot"):
+                        backend.screenshot(name, actual)
                 template = _resolve_template(spec.templates_dir, distro.name, app)
-                score = matcher.match(template, actual)
+                with _timed(timings, distro_label, app, "verify"):
+                    score = matcher.match(template, actual)
                 passed = score.value >= matcher.threshold.value
                 result = VerificationResult(
                     passed=passed,
@@ -186,7 +198,8 @@ def execute(
                     reporter.record(result.model_dump(mode="json"))
         finally:
             if not spec.dry_run:
-                _teardown(backend, name, disk_path)
+                with _timed(timings, distro_label, None, "teardown"):
+                    _teardown(backend, name, disk_path)
             if proxy is not None:
                 proxy.stop()
 
@@ -195,7 +208,43 @@ def execute(
         started_at=started_at,
         finished_at=datetime.now(UTC),
         results=results,
+        timings=timings,
     )
+
+
+@contextmanager
+def _timed(
+    timings: list[PhaseTiming],
+    distro: str,
+    app: AppId | None,
+    phase: str,
+) -> Iterator[dict[str, str | int | float | bool | None]]:
+    """Mierzy jedną fazę i dopisuje `PhaseTiming` do `timings` — także po wyjątku.
+
+    Yielduje słownik `detail`, do którego faza może dopisać liczby (ile komend,
+    ile klatek). `ok` ustawiamy sami: porażka po 60 s czekania i porażka po
+    0.1 s to dwie różne diagnozy, więc czas nie może przepaść razem z wyjątkiem.
+    """
+    detail: dict[str, str | int | float | bool | None] = {}
+    started_at = datetime.now(UTC)
+    t0 = time.perf_counter()
+    ok = True
+    try:
+        yield detail
+    except BaseException:
+        ok = False
+        raise
+    finally:
+        timings.append(
+            PhaseTiming(
+                distro=distro,
+                app=str(app) if app is not None else None,
+                phase=phase,
+                started_at=started_at,
+                seconds=time.perf_counter() - t0,
+                detail={**detail, "ok": ok},
+            )
+        )
 
 
 STORE_PROXY_READY_TIMEOUT = 20.0

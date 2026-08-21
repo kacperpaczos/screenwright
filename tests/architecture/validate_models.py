@@ -65,6 +65,7 @@ def test_shared_results_have_json_schema() -> None:
         shared_results.Score,
         shared_results.VerificationResult,
         shared_results.MatrixReport,
+        shared_results.PhaseTiming,
         shared_results.ScreenshotHash,
     ]
     for model in found:
