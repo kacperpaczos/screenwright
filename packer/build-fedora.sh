@@ -88,6 +88,9 @@ echo "IMAGE_SIZE=$(du -h "$OUT/$VM_NAME" | cut -f1)" >> "$STATUS"
 
 if tr -d '\000' < "$CONSOLE" 2>/dev/null | grep -q "$DONE_MARKER"; then
   echo "CLOUD_INIT_DONE=yes" >> "$STATUS"
+  if tr -d '\000' < "$CONSOLE" 2>/dev/null | grep -qiE "package_update_upgrade_install.*fail|dnf.*error|failed to install"; then
+    echo "WARN=cloud-init zgłosił problem z instalacją pakietu (nie-krytyczne, jeśli smoke OK)" >> "$STATUS"
+  fi
   echo "RESULT=OK (zweryfikuj smoke-testem przed promocją)" >> "$STATUS"
   status_rc=0
 else

@@ -50,6 +50,11 @@ echo "IMAGE_SIZE=$(du -h "$OUT/ubuntu-24.04.qcow2" | cut -f1)" >> "$STATUS"
 # Twardy warunek kompletności: marker cloud-init w logu konsoli.
 if tr -d '\000' < "$CONSOLE" 2>/dev/null | grep -q "$DONE_MARKER"; then
     echo "CLOUD_INIT_DONE=yes" >> "$STATUS"
+    # marker = cloud-init doszedł do końca, ale pojedynczy pakiet mógł się nie
+    # zainstalować (nie-krytyczny) — sygnalizujemy, smoke-test jest arbitrem.
+    if tr -d '\000' < "$CONSOLE" 2>/dev/null | grep -q "package_update_upgrade_install.*fail"; then
+        echo "WARN=cloud-init zgłosił porażkę instalacji pakietu (nie-krytyczne, jeśli smoke OK)" >> "$STATUS"
+    fi
     echo "RESULT=OK (obraz kompletny; zweryfikuj smoke-testem przed promocją do golden)" >> "$STATUS"
     status_rc=0
 else
