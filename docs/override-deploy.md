@@ -45,6 +45,18 @@ utrudnia chrome GNOME Software, nie sama podmiana:
   musi mieć wyłączone `idle-delay`/blank.
 - **cache zrzutów** GNOME Software (`~/.cache/gnome-software`) trzeba wyczyścić,
   by przerysował po podmianie.
+- **fokus okna.** `gnome-software --details=<id>` uruchomiony przez SSH aktywuje
+  usługę, ale okno nie zawsze wychodzi na pierwszy plan — `virsh screenshot`
+  łapie wtedy przegląd Aktywności, nie stronę sklepu.
+
+### Wykonalny następny krok dla weryfikacji wizualnej
+
+Zamiast walczyć z framebufferem i fokusem: robić zrzut **w sesji** przez
+`grim` (Wayland) po SSH (łapie konkretne okno, nie cały ekran, i nie zależy od
+tego, czy okno jest na wierzchu w chwili `virsh screenshot`), albo podnieść okno
+przez `gdbus call ... org.gnome.Shell.Eval` przed `virsh screenshot`. Do tego
+aplikacja tylko-rpm (wariant rpm od razu), `first-run false` i `idle-delay 0`
+ustawione przed pierwszym startem sklepu, oraz czyszczenie `~/.cache/gnome-software`.
 
 To są punkty „chrome" znane z Etapu 0 (TODO §6). Domknięcie wizualnej
 weryfikacji = ich obsługa + porównanie template match; mechanizm podmiany jest
