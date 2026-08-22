@@ -1,4 +1,4 @@
-.PHONY: lint test validate build clean install dev
+.PHONY: lint test test-cov validate refresh clean install dev
 
 PYTHON ?= python3
 RUFF ?= ruff
@@ -20,8 +20,8 @@ validate:
 	find . -name "*.xml" -not -path "./.git/*" -exec xmllint --noout {} +
 	lint-imports
 
-build:
-	$(PYTHON) -m cli matrix --spec matrix-spec.json
+refresh:
+	scripts/refresh-screenshot-db.sh
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist

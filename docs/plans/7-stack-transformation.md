@@ -206,12 +206,22 @@ są żywą zależnością `cli visualcheck`. Budowniczowie golden (`distro_build
 zostają do czasu Packera (jedyny otwarty gate retirementu, `BACKLOG.md`). Bramka
 lokalna zielona (277 testów, 80% cov).
 
-Pozostało: Faza 3 (Mint/elementary — brak oficjalnych cloud image'ów, wymaga
-budowy Packerem z ISO; harmonogram `systemd --user`), pełne pobranie mediów
-(dziesiątki tys. obrazów — zadanie wsadowe), Faza 4 (podmiana + weryfikacja
-wizualna — na golden desktop images z Etapu 0). Prowenancja `guest-flatpak`:
-Flathub jest wspólny między dystrybucjami, więc dedupe zostawia go pod pierwszą
-(fedora) — do rozważenia `distro=flathub` dla tego źródła.
+**Packer (2026-08-22, kod gotowy — buildy/weryfikacja jutro):** `packer/`
+(`ubuntu.pkr.hcl` zbudowany do końca; `fedora.pkr.hcl` ws/kde napisany +
+validate; `build-all.sh` sekwencyjny; `promote.sh`). Odblokowuje retirement
+builderów po jutrzejszym smoke → dopięcie metryki „kod in-house VM < 500".
+
+**One-command refresh (TODO §7, zrobione):** `scripts/refresh-screenshot-db.sh`
+/ `make refresh` — provision→collect→import→hydrate, idempotentne.
+
+**Prowenancja `guest-flatpak` — już zaimplementowana:** `entry_distro` +
+`_SOURCE_DISTRO` dają flatpak→`flathub`, snap→`snap` jako własny kubełek, więc
+dedupe nie scala ich pod dystrybucję kolektora (komentarz w `guest.py:152`).
+
+Pozostało: pełne pobranie mediów (leci w tle, wznawialne), Faza 3
+(Mint/elementary — odłożone do `TODO.md §9`; brak cloud image'ów / instalatorów),
+oraz **jutro na VM-ach (jeden naraz):** smoke Packera → `promote.sh` → retirement
+builderów (`distro_builders`, `install-fedora.sh`, `seed-ubuntu.sh`).
 
 ## 6. Metryki
 

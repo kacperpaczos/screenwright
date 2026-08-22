@@ -88,11 +88,23 @@ schemas/      — JSON Schema files (corpus-index, ubuntu-autoinstall)
 
     python -m cli collect --apps apps.json --distros fedora,flathub,ubuntu,snap,debian,mint,elementary
 
+### Refresh the whole corpus with one command
+
+    make refresh                        # provision collectors → collect → import → hydrate media
+    # or, with knobs:
+    DISTROS=fedora,ubuntu HYDRATE=20000 scripts/refresh-screenshot-db.sh
+    SKIP_PROVISION=1 HYDRATE=0 scripts/refresh-screenshot-db.sh   # reuse collectors, index only
+
 ### Collect from inside real distros, and substitute a screenshot (Ansible)
 
     cd ansible && ansible-playbook playbooks/site.yml               # provision → collect (cel 1)
     ansible-playbook playbooks/deploy-override.yml \                # substitute + verify (cel 2)
         -e override_component_id=GameConqueror.desktop -e override_prefix=gimp
+
+### Build golden VM images declaratively (Packer)
+
+    packer plugins install github.com/hashicorp/qemu   # once
+    packer/build-all.sh                                # ubuntu + fedora ws/kde, one VM at a time
 
 ### Patch a screenshot into an AppStream catalogue in place
 

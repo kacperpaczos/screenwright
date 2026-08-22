@@ -226,11 +226,16 @@ scope.
 
 ## 7. One-click refresh of the screenshot database
 
-- [ ] Provide an **install / setup script** and a **one-click (or one-command) solution** to refresh the screenshot corpus end-to-end
-- [ ] Pipeline should: collect store images → run our captures where configured → update the comparison dataset → (optionally) refresh local AppStream overrides / media used by the site
-- [ ] Document prerequisites and make the happy path boring: clone → run one script → updated database
-
-Deliverable: e.g. `scripts/refresh-screenshot-db.sh` (or equivalent) + README section.
+- [x] One-command refresh: `scripts/refresh-screenshot-db.sh` (also `make refresh`) —
+      provision collectors + collect catalogs (Ansible `site.yml`) → import to the
+      corpus index → hydrate media bytes. Env knobs: `DISTROS`, `HYDRATE`,
+      `SKIP_PROVISION`, `OUTPUT`. Idempotent/resumable. (2026-08-22)
+- [x] Prerequisites documented (script checks ansible-core, `python -m cli`, SSH key;
+      auto-runs `build-keypair.sh` if missing) + README "Refresh the corpus" section.
+- [ ] Captures leg (`run our captures where configured`) and override/media refresh
+      are separate commands today (`cli capture`, `cli override --patch`,
+      `ansible deploy-override.yml`); fold into the refresh script once the capture
+      side is wired to the corpus.
 
 ## 8. Public website
 
