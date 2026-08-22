@@ -123,6 +123,11 @@ covered by tests — worth knowing before touching this again:
 
 ### Still to do here
 
+- [x] **Cel 2 mechanizm podmiany** — `ansible/roles/deploy-override` wstrzykuje override AppStream, sklep widzi nasz zrzut (`docs/override-deploy.md`, 2026-08-22).
+- [ ] **Wizualna weryfikacja cel 2**: obsłużyć chrome GNOME (wariant flatpak vs rpm, modal third-party, wygaszanie ekranu, cache gnome-software), potem template-match zrzutu; toż dla Discover/KDE i snap-store.
+- [ ] **provision-visual**: rola stawiająca golden desktop (4 GiB, passt) jak kolektory, żeby cel 2 był w site.yml.
+- [ ] **Retirement starego kodu matrycy** (runner/warm_cache/guest/domain_xml/backends) po przejściu weryfikacji wizualnej na nowy tor.
+
 - [x] Run the full matrix end to end and confirm the report references real
       framebuffer PNGs, not 70-byte `FakeBackend` placeholders — done
       2026-08-22 on Fedora WS (`docs/matrix-timing.md`): 548 KB framebuffer

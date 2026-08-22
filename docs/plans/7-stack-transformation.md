@@ -177,6 +177,14 @@ Decyzje techniczne podjęte po drodze (wszystkie udokumentowane w kodzie):
 4. **Maszyny trwałe, `managedsave` między przebiegami** (nie transient/destroy) —
    zgodnie z modelem „maszyny per cel". Warm cache z Etapu 0 tu niepotrzebny.
 
+**Faza 4 / cel 2 (increment 1, 2026-08-22):** mechanizm podmiany **działa** —
+rola `ansible/roles/deploy-override` wstrzykuje override AppStream (priority=1) do
+Fedory WS; `appstreamcli dump` (metadane sklepu) zwraca nasz URL, GNOME Software
+pobiera nasz obraz po HTTP (`docs/override-deploy.md`). Wizualne potwierdzenie w
+karuzeli wymaga obsługi chrome GNOME (domyślny wariant flatpak, modal, wygaszanie,
+cache) — polish, nie mechanizm. Retirement starego kodu matrycy nastąpi, gdy
+weryfikacja wizualna przejdzie w pełni na ten tor.
+
 Pozostało: Faza 3 (Mint/elementary — brak oficjalnych cloud image'ów, wymaga
 budowy Packerem z ISO; harmonogram `systemd --user`), pełne pobranie mediów
 (dziesiątki tys. obrazów — zadanie wsadowe), Faza 4 (podmiana + weryfikacja

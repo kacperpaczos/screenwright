@@ -1,0 +1,54 @@
+---
+# Wstrzykuje override AppStream do prawdziwej dystrybucji i sprawia, że sklep go widzi.
+# Zweryfikowane 2026-08-22 na Fedorze WS: po tych krokach `appstreamcli dump <id>`
+# zwraca nasz URL zrzutu (priority=1), a GNOME Software pobiera nasz obraz po HTTP.
+- name: Katalog mediów w gościu
+  ansible.builtin.file:
+    path: "{{ override_media_dir }}"
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: Wgraj obrazy override
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ override_media_dir }}/{{ item | basename }}"
+    mode: "0644"
+  become: true
+  loop: "{{ override_media }}"
+
+- name: Serwer mediów w gościu (systemd transient; URL-e w override wskazują na 127.0.0.1)
+  ansible.builtin.command:
+    cmd: >-
+      systemd-run --unit=swmedia --collect --
+      python3 -m http.server {{ override_media_port }} --directory {{ override_media_dir }}
+  become: true
+  register: swmedia
+  changed_when: "'Running as unit' in (swmedia.stderr + swmedia.stdout)"
+  failed_when: swmedia.rc != 0 and 'already exists' not in (swmedia.stderr | default(''))
+
+- name: Wgraj override do katalogu AppStream (priority=1)
+  ansible.builtin.copy:
+    src: "{{ override_xml_gz }}"
+    dest: "{{ override_catalog_dir }}/{{ override_filename }}"
+    mode: "0644"
+  become: true
+
+- name: Przebuduj cache AppStream
+  ansible.builtin.command:
+    cmd: appstreamcli refresh --force
+  become: true
+  changed_when: true
+
+- name: Potwierdź, że katalog sklepu widzi nasz zrzut
+  ansible.builtin.command:
+    cmd: appstreamcli dump {{ override_component_id }}
+  register: dump
+  changed_when: false
+  failed_when: false
+
+- name: Nasz URL zrzutu jest w metadanych, które czyta sklep
+  ansible.builtin.assert:
+    that: "('127.0.0.1:' ~ override_media_port) in dump.stdout"
+    success_msg: "override widoczny dla sklepu ({{ override_component_id }})"
+    fail_msg: "override NIE trafił do katalogu sklepu — sprawdź plik i appstreamcli refresh"

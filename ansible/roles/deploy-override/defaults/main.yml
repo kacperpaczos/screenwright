@@ -1,0 +1,10 @@
+---
+# Katalog AppStream w gościu, do którego wstawiamy override (priority=1).
+override_catalog_dir: /usr/share/swcatalog/xml
+override_filename: 90-screenwright.xml.gz
+# Lokalny (w gościu) serwer mediów, na który wskazują URL-e w override.
+override_media_dir: /var/tmp/swmedia
+override_media_port: 8080
+# Pliki do wgrania: override_xml_gz (lokalny .xml.gz) + override_media (lista lokalnych obrazów).
+override_xml_gz: ""
+override_media: []

@@ -1,0 +1,10 @@
+---
+# Cel 2: wstrzyknij override zrzutów do maszyny wizualnej i potwierdź, że sklep go widzi.
+# Zmienne podaje wołający: override_component_id, override_xml_gz, override_media.
+# Przykład generowania override: `python -m cli override --id <ID> --base-url
+# http://127.0.0.1:8080 --prefix <p> --priority 1 --catalog <fedora.xml.gz> --out X.xml`
+- name: Deploy AppStream override
+  hosts: visual
+  gather_facts: false
+  roles:
+    - deploy-override
