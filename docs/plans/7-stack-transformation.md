@@ -206,10 +206,15 @@ są żywą zależnością `cli visualcheck`. Budowniczowie golden (`distro_build
 zostają do czasu Packera (jedyny otwarty gate retirementu, `BACKLOG.md`). Bramka
 lokalna zielona (277 testów, 80% cov).
 
-**Packer (2026-08-22, kod gotowy — buildy/weryfikacja jutro):** `packer/`
-(`ubuntu.pkr.hcl` zbudowany do końca; `fedora.pkr.hcl` ws/kde napisany +
-validate; `build-all.sh` sekwencyjny; `promote.sh`). Odblokowuje retirement
-builderów po jutrzejszym smoke → dopięcie metryki „kod in-house VM < 500".
+**Packer — Ubuntu ZWERYFIKOWANY i PROMOWANY do golden (2026-08-23).** Smoke na
+odbudowanym obrazie przeszedł w pełni: SSH (user test + klucz), gnome-software,
+snap-store, qemu-guest-agent active, graphical.target, autologin, ubuntu-desktop.
+`packer/promote.sh` podmienił golden (stary → `.bak-*`). Fedora WS/KDE
+(`fedora.pkr.hcl` + `build-fedora.sh`) — build w toku (jeden VM naraz).
+Retirement builderów po zielonej Fedorze; uwaga: Packer Ubuntu **reużywa**
+`UbuntuBuilder` (seed), więc `distro_builders/ubuntu.py` zostaje — do usunięcia
+tylko Anaconda Fedory (`fedora_ws/kde.py`) + wrappery `install-fedora.sh`/
+`seed-ubuntu.sh`.
 
 **One-command refresh (TODO §7, zrobione):** `scripts/refresh-screenshot-db.sh`
 / `make refresh` — provision→collect→import→hydrate, idempotentne.
