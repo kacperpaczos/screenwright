@@ -3,9 +3,11 @@
 screenwright runs an application on a headless display, captures a screenshot of
 its window, and substitutes that image into the metadata a software centre reads.
 
-It also builds a **corpus** of screenshots used by various Linux distributions
-(Fedora, Ubuntu, Mint, elementary, Flathub, Snap, Debian) and an **automated VM
-matrix** that verifies those screenshots appear correctly in real software centres.
+It also builds a **corpus** of the screenshots various Linux distributions ship
+(Fedora, Ubuntu, Mint, elementary, Flathub, Snap, Debian), collected from inside
+real systems, and **verifies** that a substituted screenshot renders correctly in
+a real software centre (proven live on GNOME Software 50 — see
+`docs/override-deploy.md`).
 
 ## Status
 
@@ -15,16 +17,20 @@ Implemented:
 - `domains/override/` — AppStream catalogue override (replaces `poc/make-override.py`)
 - `domains/corpus/` — collectors for Fedora, Flathub, Ubuntu DEP-11, Snap,
   Debian, Mint, elementary OS
-- `domains/matrix/` — VM matrix orchestration with FakeBackend, drivers,
-  distro_builders
+- `domains/matrix/` — VM primitives (virsh/ssh backends, guest-readiness waits)
+  and golden-image builders (`distro_builders`). The run-flow engine
+  (runner/warm-cache/drivers/store-proxy) was retired 2026-08-22 in favour of the
+  Ansible collectors + override stack (`BACKLOG.md`, `docs/matrix-timing.md` keeps
+  the Etap-0 measurements).
 - `domains/verification/` — template match verification
-- `cli/` — unified CLI: `python -m cli {capture,override,collect,matrix,serve}`
+- `cli/` — unified CLI: `python -m cli {capture,override,collect,serve,vm}`
 - `shared/` — types, ports, http_client, hashing, results
 
-Live status (2026-08-22): the matrix runs end to end on real libvirt clones
-(`--execute --backend virsh`) — guest readiness over the agent and SSH, store
-commands in the user's graphical session, change-aware screenshots, per-phase
-timings and a `virsh save`/`restore` warm cache; see `docs/matrix-timing.md`.
+Live status (2026-08-22): both product goals work end to end on real rootless
+libvirt VMs. Cel 1 — 62,868 screenshots / 6,186 apps collected from inside Fedora
+and Ubuntu via Ansible (`docs/collectors.md`). Cel 2 — an AppStream override
+patched into the base catalogue makes GNOME Software render our screenshot
+(`docs/override-deploy.md`, `docs/platform-notes.md`).
 
 Not implemented:
 
@@ -53,7 +59,8 @@ schemas/      — JSON Schema files (corpus-index, ubuntu-autoinstall)
 - Python ≥ 3.11
 - For capture: `Xvfb`, ImageMagick (`import`), `python3-xlib`
 - For corpus: outbound HTTPS to Fedora/Flathub/Ubuntu/Snap/Debian/Mint/elementary
-- For matrix: libvirt/QEMU on the host (only when running outside `dry_run`)
+- For VM work (golden builds, live verification): rootless libvirt/QEMU + passt
+  on the host; provisioning via Ansible (`ansible/`)
 
 ## Install
 
@@ -81,13 +88,18 @@ schemas/      — JSON Schema files (corpus-index, ubuntu-autoinstall)
 
     python -m cli collect --apps apps.json --distros fedora,flathub,ubuntu,snap,debian,mint,elementary
 
-### Plan or execute a VM matrix run
+### Collect from inside real distros, and substitute a screenshot (Ansible)
 
-    python -m cli matrix --spec matrix-spec.json                    # plan (always safe)
-    python -m cli matrix --spec matrix-spec.json --execute \
-        --backend virsh --output vm/reports/matrix.json             # real libvirt run
-    python -m cli matrix --spec matrix-spec.json --execute \
-        --backend fake --output vm/reports/matrix.json              # dry-run with FakeBackend
+    cd ansible && ansible-playbook playbooks/site.yml               # provision → collect (cel 1)
+    ansible-playbook playbooks/deploy-override.yml \                # substitute + verify (cel 2)
+        -e override_component_id=GameConqueror.desktop -e override_prefix=gimp
+
+### Patch a screenshot into an AppStream catalogue in place
+
+    python -m cli override --patch --id GameConqueror.desktop \
+        --base-url http://127.0.0.1:8080 --prefix gimp \
+        --catalog /usr/share/swcatalog/xml/fedora.xml.gz \
+        --out /usr/share/swcatalog/xml/fedora.xml.gz
 
 `dry_run` is resolved from two places: without `--execute` the run is always a
 plan; with `--execute` the spec decides — `"dry_run": true` in the JSON is a

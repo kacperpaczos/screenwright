@@ -186,8 +186,15 @@ Kluczowe: libappstream **UNIONuje** `<screenshots>` komponentów o tym samym id,
 `merge="replace"` jest ignorowany — więc override musi **przepisać katalog bazowy
 w miejscu** (`domains/override.patch_catalog`, `cli override --patch`); rola
 `deploy-override` robi to (pobierz→patch→odeślij) i asertuje, że komponent ma
-**dokładnie jeden** `<screenshot>` (nie union). Pozostaje retirement starego kodu
-matrycy oraz KDE Discover / snap-store tym samym torem.
+**dokładnie jeden** `<screenshot>` (nie union). Pozostaje KDE Discover / snap-store
+tym samym torem.
+
+**Retirement silnika matrycy (2026-08-22):** wycofany run-flow zastąpiony przez
+Ansible — usunięto `runner`, `warm_cache`, `store_proxy`, `domain_xml`, `drivers`,
+`cli/matrix_cmd` + modele matrycowe z `shared/results` (~1900 LOC kodu + ~3.6k LOC
+testów). Zostają prymitywy VM (`domains/matrix/backend`, `guest`) i budowniczowie
+golden (`distro_builders`) — do czasu Packera i repo-toola `visual-check`
+(sekwencja w `BACKLOG.md`). Bramka lokalna zielona po usunięciu (263 testy, 80% cov).
 
 Pozostało: Faza 3 (Mint/elementary — brak oficjalnych cloud image'ów, wymaga
 budowy Packerem z ISO; harmonogram `systemd --user`), pełne pobranie mediów

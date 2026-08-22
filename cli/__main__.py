@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from cli.capture_cmd import run_capture
 from cli.collect_cmd import run_collect
-from cli.matrix_cmd import run_matrix_execute, run_matrix_plan
 from cli.override_cmd import run_override
 from cli.serve_cmd import run_serve_start, run_serve_status, run_serve_stop
 from cli.vm_cmd import add_vm_parser
@@ -20,7 +19,7 @@ if TYPE_CHECKING:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="screenwright",
-        description="Headless screenshot capture, corpus, and VM matrix",
+        description="Headless screenshot capture and corpus",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -74,57 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="pomiń pobieranie bajtów obrazów (zapisuj tylko metadane z media/unfetched.png)",
     )
 
-    p_matrix = sub.add_parser("matrix", help="planuj lub wykonaj matrycę VM")
-    p_matrix.add_argument("--spec", required=True)
-    p_matrix.add_argument(
-        "--execute",
-        action="store_true",
-        help="wykonaj zamiast planować; spec z dry_run=true i tak odmówi (blokada)",
-    )
-    p_matrix.add_argument(
-        "--backend",
-        choices=["virsh", "fake"],
-        default="virsh",
-        help="backend dla --execute (virsh=wymaga libvirt; fake=symulacja)",
-    )
-    p_matrix.add_argument("--output", default="vm/reports/matrix-report.json")
-    p_matrix.add_argument(
-        "--store-proxy-port",
-        type=int,
-        default=8900,
-        help="port lokalnego snap-store-proxy (gdy DistroSpec.store_proxy == snap-store)",
-    )
-    p_matrix.add_argument(
-        "--cli-serve-base",
-        default="http://127.0.0.1:8899",
-        help="URL serwera screenshotów (cli serve), na który wskazują media w snap-store-proxy",
-    )
-    p_matrix.add_argument(
-        "--media-dir",
-        default="poc/media",
-        help="katalog serwowany przez `cli serve` — z niego budowane są URL-e mediów",
-    )
-    p_matrix.add_argument(
-        "--work-root",
-        default=None,
-        help="katalog overlayów i zrzutów przebiegu (domyślnie <image_root>/runs; nie tmpfs)",
-    )
-    p_matrix.add_argument(
-        "--warm-root",
-        default=None,
-        help="katalog szablonów warm cache (domyślnie <image_root>/warm dla --backend virsh)",
-    )
-    p_matrix.add_argument(
-        "--no-warm-cache",
-        action="store_true",
-        help="zawsze zimny boot, bez save/restore",
-    )
-    p_matrix.add_argument(
-        "--rebuild-warm-cache",
-        action="store_true",
-        help="skasuj szablony warm dystrybucji ze specu przed przebiegiem",
-    )
-
     p_override = sub.add_parser("override", help="zbuduj override katalogu AppStream")
     p_override.add_argument("--id", required=True)
     p_override.add_argument("--base-url", required=True)
@@ -168,10 +116,6 @@ def dispatch(args: argparse.Namespace) -> int:
         return run_capture(args)
     if args.command == "collect":
         return run_collect(args)
-    if args.command == "matrix":
-        if args.execute:
-            return run_matrix_execute(args)
-        return run_matrix_plan(args)
     if args.command == "override":
         return run_override(args)
     if args.command == "serve":
