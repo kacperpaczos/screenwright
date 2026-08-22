@@ -131,8 +131,23 @@ covered by tests — worth knowing before touching this again:
       cold-starting (~30–45 s to a window) for *every* app because the driver
       quits it first; `--details` on the running instance only switches the
       page. Biggest remaining lever on run time.
-- [ ] **Warm template with the store already running** (save after the first
-      store render), so each app is a page switch, not a cold start.
+- [x] **Warm template with the store already running** — done 2026-08-22:
+      `StoreDriver.warmup_commands()` runs before `virsh save`, with a 60 s
+      minimum wait because GNOME gives no usable "window mapped" signal (see
+      `docs/matrix-timing.md`).
+- [ ] **Ubuntu clones boot slowly**: SSH answers only ~2 min after `virsh
+      create` — cloud-init runs on every clone boot without a datasource. Run
+      `cloud-init clean --logs` and create `/etc/cloud/cloud-init.disabled` at
+      the end of the provisioning boot in `distro_builders/ubuntu.py`.
+- [ ] **No "store window mapped" signal on GNOME 46/50**: `Introspect.GetWindows`
+      is denied and the GTK window export exists for hidden windows too, so the
+      first app's settle in a cold run can close on the Activities overview
+      collapsing (~3 s) before the store appears. Template verification is the
+      arbiter; a KWin-script probe for Plasma and a future GNOME API would make
+      `window_probe()` useful.
+- [ ] **Discover after restore/cold boot shows "Loading…" + "Update Issue"**
+      for a long time (PackageKit refresh); settle accepts the stable loading
+      screen. Suppress the modal and wait for the page model in the driver.
 - [ ] Golden-image chrome seen on 2026-08-22: GNOME Software's "Enable Third
       Party Software Repositories?" modal covers the details page
       (`org.gnome.software show-nonfree-prompt=false` in the builder), and
@@ -143,8 +158,9 @@ covered by tests — worth knowing before touching this again:
       session commands go over SSH now. If SSH is ever unavailable, the
       alternative is an SELinux boolean/policy for the agent in the golden
       image — not explored.
-- [ ] `work_root` defaults to `/tmp/screenwright-matrix` (tmpfs): screenshots
-      and per-run overlays land in RAM; move it under `image_root`.
+- [x] `work_root` moved from tmpfs to `<image_root>/runs` (`--work-root`) —
+      a cold KDE clone filled /tmp in a minute (`Disk quota exceeded`) and
+      `virsh screenshot` died with it.
 - [ ] Host memory: systemd-oomd killed the whole terminal scope on 2026-08-22
       when an image build (virt-sparsify) overlapped with matrix clones. Run
       builds and matrix passes in their own `systemd-run --user --scope`, never

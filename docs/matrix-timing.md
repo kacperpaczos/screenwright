@@ -289,4 +289,46 @@ szablonem sklep już jest na ekranie, więc każda aplikacja to nawigacja.
 sondy Introspect w pierwszej wersji), zimny KDE bez błędu dysku: 4.4 + 26.8 s.
 Powtórka po poprawkach — niżej.
 
-_(sekcja „Pełna matryca po poprawkach" — w trakcie)_
+## Pełna matryca po poprawkach — 2026-08-22 02:05 (liczby dla Bramki A)
+
+`matrix-spec.json` (fedora-ws, fedora-kde, ubuntu-24.04 × kcalc, GIMP), szablony
+warm zbudowane z 60-s rozgrzewką; raporty `vm/reports/final-warm-hit.json`,
+`vm/reports/final-cold.json`.
+
+| | zimny boot (`--no-warm-cache`) | warm hit | przyspieszenie |
+| --- | ---: | ---: | ---: |
+| Fedora WS | 58.5 s (boot 15.3, render 42.6) | **11.8 s** (restore 2.8 + gotowość 0.4, kcalc 3.4, GIMP 4.6) | 5.0× |
+| Fedora KDE | 53.9 s (boot 17.3, render 36.3) | **29.3 s** (restore 3.5 + 0.4, kcalc 3.5, GIMP 21.6) | 1.8× |
+| Ubuntu 24.04 | 138.3 s (boot 128.7 — SSH po 121 s, render 9.3) | **10.9 s** (restore 3.3 + 0.5, kcalc 3.4, GIMP 3.4) | 12.7× |
+| **razem** | **250.7 s** | **52.0 s** | **4.8×** |
+
+Sumy faz warm hit: `boot` 11.0 s (restore 9.6 + agent/SSH/sesja 1.4), `launch`
+2.4 s, `settle` 37.6 s (z czego 20.4 s to strona GIMP-a w Discoverze), reszta
+< 1 s. Względem pierwszego baseline'u WS (53.0 s z `--quit`): 4.5×.
+
+Co to znaczy dla Bramki A (pytania z planu transformacji):
+
+- **Czas przebiegu**: cel „≥3× po Etapie 0" osiągnięty dla matrycy jako całości
+  (4.8×) i dla WS/Ubuntu; KDE zostaje przy 1.8×, bo Discover po restore i tak
+  ładuje stronę ~20 s („Loading…", modal „Update Issue") — to temat drivera /
+  golden image'a, nie warm cache'u. Drugi szablon (z otwartą stroną aplikacji)
+  nic tu nie da, bo nawigacja i tak czeka na PackageKit.
+- **Hipoteza z początku dnia** (boot 60–70 %) była fałszywa: na zimno boot to
+  31 % (WS) – 93 % (Ubuntu przez cloud-init), render 68 % (WS); warm cache
+  zdjął praktycznie cały boot (11 s na 3 maszyny) **i** — przez rozgrzany
+  sklep w szablonie — większość renderu, bo po restore każda aplikacja to
+  nawigacja w załadowanym sklepie.
+- **Zastrzeżenia do liczb**: w zimnych biegach settle pierwszej aplikacji na
+  GNOME (WS, Ubuntu) kończy się po ~3 s na zwinięciu przeglądu Aktywności
+  (dystans ≈1.0), zanim pojawi się okno — zimny render jest więc lekko
+  **niedoszacowany** (realnie WS ≈ +30 s). To nie zmienia wniosku, a w warm
+  hit artefakt nie występuje (sklep już na ekranie; dystans 0.17–0.24 to
+  zmiana strony w oknie).
+- **Koszt jednorazowy**: szablon = zimny boot + 60 s rozgrzewki + save/restore
+  (WS 95 s, Ubuntu 207 s, KDE 64 s), ~0.6–1 GB stanu na dystrybucję (zstd),
+  unieważniany automatycznie po zmianie golden/sprzętu/QEMU.
+
+Co zostało (poza zakresem Etapu 0, wpisane w TODO §6): wyłączenie cloud-init
+w golden Ubuntu (zimny boot 130 s → ~20 s), chrome GNOME Software (modal
+repozytoriów, przegląd Aktywności), Discover (modal „Update Issue", czekanie na
+model strony), sygnał „okno zmapowane" (KWin-script / przyszłe GNOME API).

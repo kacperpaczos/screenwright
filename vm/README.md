@@ -215,7 +215,12 @@ nie używa warm cache, chyba że podasz `--warm-root`.
 Plik stanu ma rozmiar RAM-u gościa; w trybie sesji demon czyta
 `~/.config/libvirt/qemu.conf` (bez sudo) — `save_image_format = "zstd"` daje
 ~1 GB przy 4 GiB gościa. Po `dnf upgrade` QEMU szablony są unieważniane
-automatycznie (manifest trzyma wersję hypervisora). Liczby: `../docs/matrix-timing.md`.
+automatycznie (manifest trzyma wersję hypervisora).
+
+Zmierzone 2026-08-22 (3 dystrybucje × 2 aplikacje): zimno 250.7 s, z warm
+cache **52.0 s** (4.8×); trafienie to ~3 s restore + ~0.5 s gotowości na
+dystrybucję, a sklep jest już na ekranie (rozgrzewka przed `save`), więc każda
+aplikacja to nawigacja. Szczegóły i zastrzeżenia: `../docs/matrix-timing.md`.
 
 ## Zdalny podgląd (human in the loop)
 
