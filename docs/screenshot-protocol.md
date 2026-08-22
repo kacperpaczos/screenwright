@@ -49,6 +49,13 @@ Fedory, osobno dla DEP-11 Ubuntu; flatpak i snap mają własne, scentralizowane
 kanały (Flathub / snapcraft), na które override AppStream nie wpływa — snap
 pozostaje poza zasięgiem (asercja `store`, patrz `snap-store-diagnostics.md`).
 
+**Zweryfikowane 2026-08-22** (`docs/override-deploy.md`): `cli override --patch`
+obsługuje oba formaty — **rpm XML** i **deb DEP-11 YAML** (wykrywa po treści).
+rpm: piksel na **GNOME Software i KDE Discover** z tego SAMEGO patcha katalogu →
+potwierdza „nie per sklep". deb: warstwa danych potwierdzona (`appstreamcli dump`
+= nasz 1 zrzut, `MediaBaseUrl` pomijany); piksel na golden Ubuntu blokuje
+środowiskowo (wygasły cert Canonical + problem gnome-software z mediami, niżej).
+
 ## Zastrzeżenie
 
 `appstream.ubuntu.com` serwuje wygasły certyfikat TLS (od 2026-07-31) — treść

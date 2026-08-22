@@ -299,3 +299,122 @@ class TestPatchCatalog:
         )
         with pytest.raises(LookupError):
             patch_catalog(spec, loader=GzipXmlCatalogLoader())
+
+
+class TestPatchCatalogDep11:
+    """patch_catalog na DEP-11 YAML (Ubuntu/deb) — inny format niż XML rpm."""
+
+    _DEP11 = """File: DEP-11
+Version: '0.8'
+Origin: ubuntu-noble-main
+MediaBaseUrl: http://archive.ubuntu.com/ubuntu/dists/noble/main/dep11
+---
+Type: desktop-application
+ID: org.example.Target
+Package: target
+Screenshots:
+- default: true
+  source-image:
+    url: pool/t/source.png
+    width: 800
+    height: 600
+  thumbnails:
+  - url: pool/t/thumb.png
+    width: 624
+    height: 351
+---
+Type: desktop-application
+ID: org.example.Keep
+Package: keep
+Screenshots:
+- default: true
+  source-image:
+    url: pool/k/keep.png
+    width: 100
+    height: 100
+"""
+
+    def _catalog(self, tmp_path: Path, name: str = "dep11.yml.gz") -> Path:
+        import gzip
+
+        p = tmp_path / name
+        with gzip.open(p, "wb") as fh:
+            fh.write(self._DEP11.encode("utf-8"))
+        return p
+
+    def test_replaces_dep11_screenshots_with_absolute_urls(self, tmp_path: Path) -> None:
+        import gzip
+
+        from domains.override.catalog import patch_catalog
+        from domains.override.models import CatalogPatchResult
+
+        catalog = self._catalog(tmp_path)
+        out = tmp_path / "out.yml.gz"
+        spec = _valid_spec(
+            component_id="org.example.Target",
+            prefix="gimp",
+            catalog_paths=[catalog],
+            out=out,
+        )
+        result = patch_catalog(spec, loader=GzipXmlCatalogLoader())
+        assert isinstance(result, CatalogPatchResult)
+        assert result.replaced_screenshots == 1
+        import yaml
+
+        with gzip.open(out) as fh:
+            docs = list(yaml.safe_load_all(fh))
+        target = next(d for d in docs if d.get("ID") == "org.example.Target")
+        # our absolute URL replaced the original relative one
+        assert target["Screenshots"][0]["source-image"]["url"] == (
+            "http://127.0.0.1:8899/gimp-source.png"
+        )
+        with gzip.open(out) as fh:
+            assert "pool/t/source.png" not in fh.read().decode()
+
+    def test_dep11_preserves_other_component_and_header(self, tmp_path: Path) -> None:
+        import gzip
+
+        from domains.override.catalog import patch_catalog
+
+        catalog = self._catalog(tmp_path)
+        out = tmp_path / "out.yml.gz"
+        spec = _valid_spec(
+            component_id="org.example.Target", prefix="gimp", catalog_paths=[catalog], out=out
+        )
+        patch_catalog(spec, loader=GzipXmlCatalogLoader())
+        import yaml
+
+        with gzip.open(out) as fh:
+            docs = list(yaml.safe_load_all(fh))
+        # header (MediaBaseUrl) and the other component survive untouched
+        header = next(d for d in docs if d.get("File") == "DEP-11")
+        assert header["MediaBaseUrl"].endswith("/dep11")
+        keep = next(d for d in docs if d.get("ID") == "org.example.Keep")
+        assert keep["Screenshots"][0]["source-image"]["url"] == "pool/k/keep.png"
+
+    def test_dep11_component_not_found_raises(self, tmp_path: Path) -> None:
+        from domains.override.catalog import patch_catalog
+
+        catalog = self._catalog(tmp_path)
+        spec = _valid_spec(
+            component_id="org.example.Missing", catalog_paths=[catalog], out=tmp_path / "o.yml.gz"
+        )
+        with pytest.raises(LookupError):
+            patch_catalog(spec, loader=GzipXmlCatalogLoader())
+
+    def test_xml_still_detected_when_mixed_with_yaml_paths(self, tmp_path: Path) -> None:
+        """Format wykrywany po treści, nie po rozszerzeniu — XML katalog dalej działa."""
+        import gzip
+
+        from domains.override.catalog import patch_catalog
+
+        xml = tmp_path / "fedora.xml.gz"
+        with gzip.open(xml, "wb") as fh:
+            fh.write(TestPatchCatalog._CATALOG_XML.encode("utf-8"))
+        out = tmp_path / "out.xml.gz"
+        spec = _valid_spec(catalog_paths=[xml], out=out)  # kcalc.desktop, XML
+        result = patch_catalog(spec, loader=GzipXmlCatalogLoader())
+        assert result.replaced_screenshots == 1
+        with gzip.open(out) as fh:
+            text = fh.read().decode()
+        assert "127.0.0.1:8899/kcalc-source.png" in text

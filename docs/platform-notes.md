@@ -89,6 +89,16 @@ Najważniejsze, bo nieoczywiste i kosztowne:
 - **snap omija AppStream** — snapd ma własne REST (`/v2/find`), zrzuty z
   `dashboard.snapcraft.io`. Podmiana zrzutu snapa jest poza zasięgiem patcha
   katalogu (patrz `docs/snap-store-diagnostics.md`).
+- **deb czyta DEP-11 YAML, nie XML.** Na Ubuntu główny katalog to
+  `/var/lib/swcatalog/yaml/…dep11…Components-amd64.yml.gz` (wielodokumentowy YAML;
+  `/usr/share/swcatalog/xml` ma tylko kuratorowane listy GNOME). `patch_catalog`
+  wykrywa format po treści i podmienia blok `Screenshots:` (URL-e **absolutne** →
+  `MediaBaseUrl` pomijany; zweryfikowane: `appstreamcli dump` = nasz 1 zrzut,
+  `mediabaseurl_prepended=0`). **Aplikacja zainstalowana** czyta lokalne
+  `metainfo`, nie katalog — override katalogu testować na **niezainstalowanej**.
+- **Ten sam patch, dwa sklepy.** GNOME Software (GTK) i KDE Discover (Qt) czytają
+  ten sam `/usr/share/swcatalog` przez libappstream — jeden patch katalogu rpm
+  renderuje nasz zrzut w obu. Podmiana jest **per platforma, nie per sklep**.
 
 Wniosek protokołowy: skuteczna podmiana jest **per platforma/wariant** (rpm, deb,
 flatpak, snap), którą sklep wyświetla — nie globalnie i nie per-sklep. Ponieważ
