@@ -138,6 +138,47 @@ Faza 1 ── fundament ──► 🚦 G1 ──► Faza 2 ── kolektory ─�
 
 ---
 
+## Stan realizacji — 2026-08-22
+
+Wykonane autonomicznie (decyzje techniczne w nawiasach):
+
+- **Faza 1 (fundament) — zrobiona, obie dystrybucje.** `terraform/`, `ansible/`,
+  `Settings.libvirt_uri` → `qemu:///session`. Pełny obieg obraz→maszyna→SSH
+  działa jednym poleceniem (`ansible/playbooks/site.yml`; patrz
+  `../collectors.md`). 🚦 **G1 zaliczona.**
+- **Faza 2 (kolektory) — rdzeń zrobiony, Fedora + Ubuntu.** Wszystkie aplikacje,
+  wszystkie formaty, zebrane z wnętrza systemów i zaimportowane do korpusu:
+  **62 868 wpisów / 6 186 aplikacji** (fedora-appstream 12 631, Flathub 41 744,
+  ubuntu-dep11 5 072, snap 3 421). Import idempotentny (`cli collect --source
+  guest`); pobór mediów na hoście z limitem `--max-media` (sprawdzony na 36
+  realnych obrazach z sha256 i wymiarami). Pełny `collect` ~2–3 min.
+  🚦 **G2 częściowo** — brakuje Mint/elementary (Faza 3) i pełnego (nie
+  ograniczonego) pobrania bajtów.
+
+Decyzje techniczne podjęte po drodze (wszystkie udokumentowane w kodzie):
+
+1. **passt zamiast NAT `default`.** `qemu:///system` na tej stacji nie forwarduje
+   egressu z gości bez zmiany firewalld wymagającej roota (ping 8.8.8.8 100%
+   loss). passt (usermode, sprawdzony w Etapie 0) daje egress bezrootowo; SSH
+   przez port-forward na `127.0.0.1:<2201|2202>`.
+2. **Ansible + `virt-install` zamiast Terraforma** (Bramka G1, wariant B).
+   Provider `dmacvicar/libvirt` na tym hoście łączy się z `qemu:///system`
+   mimo `uri="qemu:///session"` — pula/domeny lądują w systemowym daemonie,
+   qemu (uid 107) nie czyta puli w HOME. Terraform zaparkowany
+   (`../../terraform/README.md`), wraca po naprawie providera/NAT-u.
+3. **Kolektory bez desktopu, IPv4-only, seed przez xorrisofs.** cloud-init
+   wyłącza IPv6 (mirrory mają AAAA), `cloud-localds` wymaga nieobecnego
+   `genisoimage` → seed budowany `xorrisofs`.
+4. **Maszyny trwałe, `managedsave` między przebiegami** (nie transient/destroy) —
+   zgodnie z modelem „maszyny per cel". Warm cache z Etapu 0 tu niepotrzebny.
+
+Pozostało: Faza 3 (Mint/elementary — brak oficjalnych cloud image'ów, wymaga
+budowy Packerem z ISO; harmonogram `systemd --user`), pełne pobranie mediów
+(dziesiątki tys. obrazów — zadanie wsadowe), Faza 4 (podmiana + weryfikacja
+wizualna — na golden desktop images z Etapu 0). Prowenancja `guest-flatpak`:
+Flathub jest wspólny między dystrybucjami, więc dedupe zostawia go pod pierwszą
+(fedora) — do rozważenia `distro=flathub` dla tego źródła.
+
 ## 6. Metryki
 
 | Metryka | Jak | Cel |

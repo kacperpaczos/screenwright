@@ -1,0 +1,15 @@
+---
+# Jednokomendowy obieg Fazy 1+2: postaw kolektory → poczekaj na SSH → zbierz katalogi.
+# Import do korpusu robi potem `python -m cli collect --source guest ...` (patrz docs/collectors.md).
+- import_playbook: provision.yml
+
+- name: Poczekaj, aż kolektory odpowiedzą po SSH (passt → 127.0.0.1:<port>)
+  hosts: collectors
+  gather_facts: false
+  tasks:
+    - name: Czekaj na SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+        sleep: 5
+
+- import_playbook: collect.yml

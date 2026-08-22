@@ -8,8 +8,8 @@ Plan: [docs/plans/1-screenshot-corpus.md](docs/plans/1-screenshot-corpus.md)
 
 Pull (or scrape / catalogue) the **current store screenshots** for the same applications from:
 
-- [ ] **Fedora** (GNOME Software / AppStream catalogues)
-- [ ] **Ubuntu** (Snap Store / AppStream / software centre paths as applicable)
+- [x] **Fedora** (AppStream rpm + Flathub) — 2026-08-22, z wnętrza VM (`docs/collectors.md`)
+- [x] **Ubuntu** (DEP-11 deb + snap `/v2/find`) — 2026-08-22, z wnętrza VM
 - [ ] **Linux Mint** (deb community uploads + flatpak/AppStream paths)
 - [ ] **elementary OS** (AppCenter)
 
