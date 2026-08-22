@@ -229,7 +229,7 @@ builderów (`distro_builders`, `install-fedora.sh`, `seed-ubuntu.sh`).
 |---|---|---|
 | Pokrycie zdjęć | aplikacje z ≥1 zdjęciem / wszystkie, per dystrybucja × format | raportowane w indeksie; cel: zgodne z tym, co pokazuje sklep |
 | Czas pełnego zebrania | od `terraform apply` do importu | < 1 h / dystrybucja |
-| Kod in-house warstwy VM | `cloc domains/matrix vm cli/vm_cmd.py` | ~2 900 → < 500 (po fazie 4) |
+| Kod in-house warstwy VM | `wc -l domains/matrix vm cli/vm_cmd.py cli/visualcheck_cmd.py` | start ~4 800 → **2 965 teraz** (po retirementcie silnika) → ~1 630 po usunięciu builderów (jutro). Cel „< 500" ZREWIDOWANY: prymitywy `backend`+`guest` (~1 200) zostają celowo jako biblioteka automatyki VM dla `cli visualcheck` — realny cel to „zero martwego kodu orkiestracji matrycy", osiągnięty |
 | Ręczne kroki w obiegu | lista w README | 0 |
 | Czas dodania dystrybucji | zmierzyć na Mint | ≤ 1 dzień (obraz + inventory + te same role) |
 
