@@ -60,6 +60,51 @@ so the store listing does not lose its description, categories or icons.
 `fedora.xml.gz` declares no `priority`, which means 0, so 1 is enough. File load
 order does not matter — a `10-` prefix behaves identically to `90-`.
 
+## Live-system caveat: the isolated result did not render (2026-08-22)
+
+The table above was measured in an **isolated** pool (`set_flags(0)` +
+`add_extra_data_location`, one Fedora component + one of ours). On a **live**
+Fedora Workstation with the OS catalogue cache loaded, the full-component
+priority override behaved differently:
+
+- With the separate `90-screenwright.xml.gz` (full component, `priority="1"`)
+  installed and `appstreamcli refresh --force` run, **GNOME Software 50 still
+  rendered the distribution's screenshot** in the carousel — not ours — even
+  after a clean client-cache wipe (`gnome-software --quit` + `pkill -9` +
+  `rm -rf ~/.cache/gnome-software ~/.local/share/gnome-software`). The store
+  fetched only our thumbnail off the media server, yet drew the original. In the
+  live pool `appstreamcli dump <id>` came back with **two** `<screenshot>`
+  blocks (ours *and* the base), i.e. the screenshots were **unioned**, not
+  replaced — the opposite of the isolated-pool row.
+
+The most likely reason for the gap: in isolation the higher-priority component
+*replaces* the lower-priority one wholesale (one wins, one is dropped), but in
+the live system the base component comes from the precompiled
+`/var/cache/swcatalog/cache/*.xb` and libappstream **merges the two same-id
+components**, and for a list field like `<screenshots>` the merge is a union.
+A clean numeric A/B on a fresh VM is still pending (the headless harness hit an
+`appstreamcli dump`-returns-empty environment bug over SSH), so treat the exact
+mechanism as open — but the **rendered outcome** is not in doubt.
+
+### What renders in the live store: rewrite the base catalogue in place
+
+The method proven to make GNOME Software actually draw our image is to **replace
+the target component's `<screenshots>` inside the base catalogue itself**
+(`/usr/share/swcatalog/xml/fedora.xml.gz`) and write the whole catalogue back —
+no second component, so nothing to union. Implemented as
+`domains/override.patch_catalog` and `cli override --patch`; it keeps every other
+component intact. After this, `appstreamcli dump <id>` returns **exactly one**
+screenshot (ours), and the carousel shows our marker (verified: crimson fraction
+0.20 vs 0.0002 for the original — `docs/override-deploy.md`,
+`images/cel2/cel2-PROOF-store-shows-ours.png`).
+
+The trade-off: an in-place rewrite is overwritten by the next `fedora-appstream`
+package update, so it is re-applied on each provision (the `deploy-override`
+Ansible role does exactly this and asserts the one-screenshot outcome). For
+screenwright's model — machines we provision and control — that is acceptable;
+for a persistent third-party override the library gap (merge ignoring
+screenshots) still wants an upstream fix.
+
 ## Testing without touching the system
 
 `AsPool.set_load_std_data_locations(False)` is not sufficient for isolation.
