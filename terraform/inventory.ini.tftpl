@@ -1,8 +1,0 @@
-[collectors]
-%{ for name, spec in collectors ~}
-collector-${name} ansible_host=127.0.0.1 ansible_port=${spec.ssh_port} distro=${name}
-%{ endfor ~}
-
-[collectors:vars]
-ansible_user=${guest_user}
-ansible_python_interpreter=auto_silent

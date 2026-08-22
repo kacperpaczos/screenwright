@@ -7,7 +7,7 @@ import json
 import tarfile
 from pathlib import Path
 
-from domains.corpus.guest import GUEST_SOURCES, classify, discover, import_guest
+from domains.corpus.guest import GUEST_SOURCES, classify, discover, entry_distro, import_guest
 from domains.corpus.index import IndexWriter
 
 _FIX = Path(__file__).resolve().parent.parent / "fixtures" / "corpus"
@@ -211,3 +211,22 @@ class TestHydrateMedia:
 
         # nothing downloads (client errors) → 0, index intact
         assert hydrate_media(writer, limit=3, client=_Client()) == 0
+
+
+class TestEntryDistroBucket:
+    def test_flatpak_and_snap_get_their_own_bucket(self) -> None:
+        assert entry_distro("fedora", "guest-flatpak") == "flathub"
+        assert entry_distro("ubuntu", "guest-flatpak") == "flathub"
+        assert entry_distro("ubuntu", "guest-snapd") == "snap"
+        assert entry_distro("fedora", "guest-appstream") == "fedora"
+        assert entry_distro("ubuntu", "guest-dep11") == "ubuntu"
+
+    def test_imported_flatpak_entries_are_flathub(self, tmp_path: Path) -> None:
+        gd = _build_guest_dir(tmp_path)
+        writer = IndexWriter(tmp_path / "corpus")
+        import_guest(gd, writer, download_media=False)
+        flat = [e for e in writer.entries if e.source == "guest-flatpak"]
+        assert flat
+        assert {e.distro for e in flat} == {"flathub"}
+        snap = [e for e in writer.entries if e.source == "guest-snapd"]
+        assert {e.distro for e in snap} == {"snap"}

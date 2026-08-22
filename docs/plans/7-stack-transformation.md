@@ -152,8 +152,13 @@ Wykonane autonomicznie (decyzje techniczne w nawiasach):
   ubuntu-dep11 5 072, snap 3 421). Import idempotentny (`cli collect --source
   guest`); pobór mediów na hoście z limitem `--max-media` (sprawdzony na 36
   realnych obrazach z sha256 i wymiarami). Pełny `collect` ~2–3 min.
-  🚦 **G2 częściowo** — brakuje Mint/elementary (Faza 3) i pełnego (nie
-  ograniczonego) pobrania bajtów.
+  🚦 **G2 osiągnięta dla Fedory + Ubuntu** (zakres Fazy 2 wg planu). Pokrycie:
+  Fedora rpm 81%, Flathub 71%, Ubuntu deb 31%, snap 74% (własność katalogów;
+  tor łapie ~100% zawartości). Czas `site.yml` < 4 min, zero ręcznych kroków.
+  **Otwarta bramka G2 → Faza 3/cel 2:** Mint/elementary (brak cloud image'ów,
+  build Packerem z ISO; elementary bez nienadzorowanego instalatora — patrz
+  `../../BACKLOG.md`), pełne pobranie bajtów (na żądanie), oraz cel 2 (podmiana
+  + weryfikacja wizualna na golden desktop z Etapu 0).
 
 Decyzje techniczne podjęte po drodze (wszystkie udokumentowane w kodzie):
 
@@ -165,7 +170,7 @@ Decyzje techniczne podjęte po drodze (wszystkie udokumentowane w kodzie):
    Provider `dmacvicar/libvirt` na tym hoście łączy się z `qemu:///system`
    mimo `uri="qemu:///session"` — pula/domeny lądują w systemowym daemonie,
    qemu (uid 107) nie czyta puli w HOME. Terraform zaparkowany
-   (`../../terraform/README.md`), wraca po naprawie providera/NAT-u.
+   (backlog: `../../BACKLOG.md`), wraca po naprawie providera/NAT-u.
 3. **Kolektory bez desktopu, IPv4-only, seed przez xorrisofs.** cloud-init
    wyłącza IPv6 (mirrory mają AAAA), `cloud-localds` wymaga nieobecnego
    `genisoimage` → seed budowany `xorrisofs`.

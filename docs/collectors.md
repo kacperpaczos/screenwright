@@ -7,8 +7,8 @@ Realizacja celu 1 z `plans/7-stack-transformation.md` — zebranie screenshotów
 ## Stack
 
 - **Ansible** (`ansible/`) stawia maszyny przez `virt-install` i robi całą pracę
-  w gościu (role `store-tools`, `collect-catalog`). Terraform jest zaparkowany —
-  patrz `../terraform/README.md`.
+  w gościu (role `store-tools`, `collect-catalog`). Terraform odłożony do backlogu
+  (diagnoza: `../../BACKLOG.md`).
 - **libvirt/QEMU `qemu:///session`** + sieć **passt** (usermode, bezrootowy egress;
   na tym hoście NAT `default` na `qemu:///system` nie forwarduje bez roota).
 - **Python** (`domains/corpus`) tylko do modelu danych i indeksu — parsery
@@ -47,6 +47,22 @@ python -m cli vm ... # (podgląd: virt-manager --connect qemu:///session)
 
 Ponowny `ansible-playbook playbooks/provision.yml` pomija istniejące domeny
 (idempotentny), a `collect.yml` odświeża katalogi w miejscu.
+
+## Pokrycie (metryka G2) — 2026-08-22
+
+Odsetek aplikacji w każdym katalogu, które dostarczają ≥1 zrzut (własność
+ekosystemu; nasz tor łapie ~100% tego, co katalog zawiera):
+
+| Katalog | aplikacje | ze zrzutem | pokrycie |
+| --- | ---: | ---: | ---: |
+| Fedora rpm (AppStream) | 2 363 | 1 903 | 81% |
+| Flathub (flatpak) | 4 681 | 3 342 | 71% |
+| Ubuntu deb (DEP-11) | 2 941 | 899 | 31% |
+| snap (snapd `/v2/find`) | 1 565 | 1 161 | 74% |
+
+Czas pełnego `site.yml` (provision → SSH → collect) przy istniejących obrazach
+bazowych: < 4 min; zero ręcznych kroków. Prowenancja: flatpak → `flathub`,
+snap → `snap` (kanały wspólne dla dystrybucji), rpm → `fedora`, deb → `ubuntu`.
 
 ## Zmierzone (2026-08-22, Fedora 44 + Ubuntu 24.04)
 

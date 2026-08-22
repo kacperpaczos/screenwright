@@ -147,6 +147,18 @@ def _iter_snapd_entries(
                 yield entry.model_dump(mode="json")
 
 
+# Flathub i Snap Store są wspólne dla dystrybucji — zrzuty przychodzą z jednego,
+# scentralizowanego kanału niezależnie od tego, na której maszynie je zebrano.
+# Dlatego dostają własny kubełek `distro`, a nie kubełek kolektora (inaczej
+# deduplikacja po URL scaliłaby je pod dystrybucję, która trafiła pierwsza).
+_SOURCE_DISTRO = {"guest-flatpak": "flathub", "guest-snapd": "snap"}
+
+
+def entry_distro(collector_distro: str, source: str) -> str:
+    """Kubełek `distro` wpisu: flathub/snap dla platform wspólnych, inaczej dystrybucja kolektora."""
+    return _SOURCE_DISTRO.get(source, collector_distro)
+
+
 def iter_catalog_entries(
     catalog: GuestCatalog, *, distro: str, apps: set[str] | None = None
 ) -> Iterator[dict[str, object]]:
@@ -202,7 +214,8 @@ def import_guest(
             log_entry(30, "corpus.guest.nothing_found", distro=distro, guest_dir=str(guest_dir))
             continue
         for catalog in catalogs:
-            for raw in iter_catalog_entries(catalog, distro=distro, apps=app_filter):
+            bucket = entry_distro(distro, catalog.source)
+            for raw in iter_catalog_entries(catalog, distro=bucket, apps=app_filter):
                 key = (raw["source_url"], raw["app_id"], raw["source"])
                 if key in seen or key in existing:
                     continue
@@ -289,6 +302,7 @@ __all__ = [
     "GuestCatalog",
     "classify",
     "discover",
+    "entry_distro",
     "hydrate_media",
     "import_guest",
     "iter_catalog_entries",
