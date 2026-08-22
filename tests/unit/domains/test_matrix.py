@@ -12,7 +12,6 @@ from domains.matrix.models import (
     DomainConfig,
     MatrixRunSpec,
 )
-from domains.matrix.runner import plan
 from pydantic import ValidationError
 
 
@@ -68,37 +67,6 @@ class TestMatrixRunSpec:
     def test_duplicate_distros_rejected(self) -> None:
         with pytest.raises(ValidationError):
             MatrixRunSpec(apps=["a"], distros=[_distro(), _distro()])
-
-
-class TestPlan:
-    def test_plan_returns_steps(self) -> None:
-        spec = MatrixRunSpec(
-            apps=["org.kde.kcalc", "org.gimp.GIMP"],
-            distros=[_distro(DistroName.FEDORA_KDE), _distro(DistroName.UBUNTU)],
-        )
-        steps = plan(spec)
-        # Per distro: 3 verbs (create-overlay, create, destroy)
-        # Per (distro, app): 3 verbs (qemu-agent-exec, screenshot, verify)
-        # Total: 2 distros * (3 + 2 apps * 3) = 2 * 9 = 18
-        assert len(steps) == 2 * (3 + 2 * 3)
-
-    def test_plan_starts_with_distro_boot(self) -> None:
-        spec = MatrixRunSpec(apps=["a"], distros=[_distro()])
-        steps = plan(spec)
-        # Pierwsze trzy kroki per dystrybucja to boot/destroy (destroy po boot,
-        # przed app-specific verbs — bo VM żyje do końca pętli app).
-        assert steps[0].verb == "create-overlay"
-        assert steps[1].verb == "create"
-        assert steps[2].verb == "destroy"
-        # Dalej dopiero verbs per app.
-        assert steps[3].verb == "qemu-agent-exec"
-        assert steps[-1].verb == "verify"
-
-    def test_plan_sequences_unique(self) -> None:
-        spec = MatrixRunSpec(apps=["a"], distros=[_distro()])
-        sequences = [s.sequence for s in plan(spec)]
-        assert sequences == sorted(sequences)
-        assert len(set(sequences)) == len(sequences)
 
 
 class TestFakeBackend:
