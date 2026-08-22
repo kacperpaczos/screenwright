@@ -10,4 +10,4 @@ for c in $cats; do
 done
 # Widok "featured" i wyszukiwanie po pustym zapytaniu — snapd zwraca top snapy.
 api "/v2/find?section=featured&scope=wide" > "$out/find-featured.json" || true
-ls "$out" | wc -l
+find "$out" -maxdepth 1 -type f | wc -l

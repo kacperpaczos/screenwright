@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from domains.corpus.all import CollectRunner, CollectSpec
-from domains.corpus.guest import import_guest
+from domains.corpus.guest import hydrate_media, import_guest
 from domains.corpus.index import IndexWriter
 from shared.logging import log_entry
 
@@ -76,6 +76,15 @@ def _run_collect_guest(args: argparse.Namespace) -> int:
         apps = _load_apps(apps_path)
     distros = tuple(d.strip() for d in args.distros.split(",") if d.strip())
     writer = IndexWriter(Path(args.output))
+    hydrate_n = getattr(args, "hydrate_media", None)
+    if hydrate_n is not None:
+        downloaded = hydrate_media(
+            writer,
+            limit=hydrate_n,
+            per_app=getattr(args, "hydrate_per_app", None),
+        )
+        log_entry(20, "cli.collect.done", source="guest", hydrated=downloaded)
+        return 0
     counts = import_guest(
         guest_dir,
         writer,

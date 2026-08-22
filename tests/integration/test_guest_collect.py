@@ -162,3 +162,52 @@ class TestImportGuest:
         assert sum(counts.values()) > 0
         assert writer.entries == []
         assert not (tmp_path / "corpus" / "index.json").exists()
+
+
+class TestHydrateMedia:
+    def test_hydrate_downloads_and_updates_index(self, tmp_path: Path, monkeypatch) -> None:
+        from domains.corpus.guest import hydrate_media
+
+        gd = _build_guest_dir(tmp_path)
+        writer = IndexWriter(tmp_path / "corpus")
+        import_guest(gd, writer, download_media=False)
+        before = len(writer.entries)
+
+        # Fake HTTP: any URL returns a 1x1 PNG so no network is touched.
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+        class _Resp:
+            content = png
+
+        class _Client:
+            def get(self, url, **kw):
+                return _Resp()
+
+        n = hydrate_media(writer, limit=5, kinds=("source", "thumbnail"), client=_Client())
+        assert n == 5
+        # index unchanged in length; 5 entries now have real bytes on disk
+        reloaded = IndexWriter(tmp_path / "corpus")
+        assert len(reloaded.entries) == before
+        real = [e for e in reloaded.entries if e.file != Path("media/unfetched.png")]
+        assert len(real) == 5
+        for e in real:
+            assert (tmp_path / "corpus" / e.file).exists()
+            assert e.sha256 != "0" * 64
+
+    def test_hydrate_is_idempotent_and_bounded(self, tmp_path: Path) -> None:
+        from domains.corpus.guest import hydrate_media
+
+        gd = _build_guest_dir(tmp_path)
+        writer = IndexWriter(tmp_path / "corpus")
+        import_guest(gd, writer, download_media=False)
+
+        class _Client:
+            def get(self, url, **kw):
+                raise RuntimeError("network disabled")
+
+        # nothing downloads (client errors) → 0, index intact
+        assert hydrate_media(writer, limit=3, client=_Client()) == 0

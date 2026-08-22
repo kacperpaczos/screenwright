@@ -53,6 +53,10 @@ class IndexWriter:
     def append(self, entry: CorpusEntry) -> None:
         self._index.append(entry)
 
+    def replace_all(self, entries: list[CorpusEntry]) -> None:
+        """Podmienia całą listę wpisów (po hydratacji mediów). Nie zapisuje — wołaj flush()."""
+        self._index = CorpusIndex(entries=list(entries))
+
     def flush(self) -> None:
         self._root.mkdir(parents=True, exist_ok=True)
         payload = self._index.model_dump(mode="json")

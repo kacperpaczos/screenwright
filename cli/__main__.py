@@ -53,6 +53,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="ile mediów pobrać na hoście w tym przebiegu (guest)",
     )
+    p_collect.add_argument(
+        "--hydrate-media",
+        type=int,
+        default=None,
+        metavar="N",
+        help="pobierz bajty dla N wpisów już w indeksie (guest) — same URL-e stają się plikami",
+    )
+    p_collect.add_argument(
+        "--hydrate-per-app",
+        type=int,
+        default=None,
+        help="limit zdjęć na aplikację przy --hydrate-media",
+    )
     p_collect.add_argument("--output", default="corpus")
     p_collect.add_argument("--dry-run", action="store_true")
     p_collect.add_argument(
