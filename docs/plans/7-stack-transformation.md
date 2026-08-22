@@ -186,15 +186,25 @@ Kluczowe: libappstream **UNIONuje** `<screenshots>` komponentów o tym samym id,
 `merge="replace"` jest ignorowany — więc override musi **przepisać katalog bazowy
 w miejscu** (`domains/override.patch_catalog`, `cli override --patch`); rola
 `deploy-override` robi to (pobierz→patch→odeślij) i asertuje, że komponent ma
-**dokładnie jeden** `<screenshot>` (nie union). Pozostaje KDE Discover / snap-store
-tym samym torem.
+**dokładnie jeden** `<screenshot>` (nie union).
+
+**Protokół potwierdzony na 2 sklepach × 2 platformach (2026-08-22):** ten sam
+patch katalogu rpm renderuje nasz zrzut w **GNOME Software** (GTK, crimson 0.20)
+**i KDE Discover** (Qt, crimson 0.16) → podmiana jest **per platforma, nie per
+sklep** (`cel2-PROOF-discover-shows-ours.png`). deb: `patch_catalog` obsługuje
+też **DEP-11 YAML** (wykrywa format po treści); `appstreamcli dump` = nasz 1 zrzut
+z URL-ami absolutnymi (MediaBaseUrl pomijany) — warstwa danych potwierdzona,
+piksel na Ubuntu blokuje środowiskowo (cert Canonical + gnome-software media).
+snap omija AppStream (granica). Cała weryfikacja jako repo-tool: **`cli
+visualcheck`** (`docs/override-deploy.md`).
 
 **Retirement silnika matrycy (2026-08-22):** wycofany run-flow zastąpiony przez
 Ansible — usunięto `runner`, `warm_cache`, `store_proxy`, `domain_xml`, `drivers`,
 `cli/matrix_cmd` + modele matrycowe z `shared/results` (~1900 LOC kodu + ~3.6k LOC
-testów). Zostają prymitywy VM (`domains/matrix/backend`, `guest`) i budowniczowie
-golden (`distro_builders`) — do czasu Packera i repo-toola `visual-check`
-(sekwencja w `BACKLOG.md`). Bramka lokalna zielona po usunięciu (263 testy, 80% cov).
+testów). Prymitywy VM (`domains/matrix/backend`, `guest`) zostają **na stałe** —
+są żywą zależnością `cli visualcheck`. Budowniczowie golden (`distro_builders`)
+zostają do czasu Packera (jedyny otwarty gate retirementu, `BACKLOG.md`). Bramka
+lokalna zielona (277 testów, 80% cov).
 
 Pozostało: Faza 3 (Mint/elementary — brak oficjalnych cloud image'ów, wymaga
 budowy Packerem z ISO; harmonogram `systemd --user`), pełne pobranie mediów
