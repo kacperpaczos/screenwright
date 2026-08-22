@@ -6,6 +6,12 @@ from domains.verification.template_match import (
     IdentityMatcher,
     OpenCVTemplateMatcher,
 )
+from domains.verification.visual import (
+    color_fraction,
+    dominant_color,
+    marker_fraction,
+    store_shows_marker,
+)
 
 __all__ = [
     "IdentityMatcher",
@@ -13,4 +19,8 @@ __all__ = [
     "OpenCVTemplateMatcher",
     "Reporter",
     "TemplateMatcher",
+    "color_fraction",
+    "dominant_color",
+    "marker_fraction",
+    "store_shows_marker",
 ]
