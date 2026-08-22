@@ -54,15 +54,16 @@ nowy tor. Weryfikacja cel 2 przeszła (`docs/override-deploy.md`), ale mapa
 zależności (analiza 2026-08-22) pokazuje, że **całościowe usunięcie jest jeszcze
 przedwczesne** — dwa bloki są nadal potrzebne:
 
-**NIE usuwać jeszcze (nadal używane):**
+**NIE usuwać (nadal używane):**
 - `domains/matrix/distro_builders/` (668 LOC) + `vm/build/install-fedora.sh`,
   `seed-ubuntu.sh` — **budują golden images** (`fedora-ws.qcow2` itd.), których
   weryfikacja wizualna cel 2 nadal używa (overlay na golden). Plan 7 przewiduje
   zastąpienie **Packerem** — dopóki go nie ma, budowniczych nie ruszać.
 - `domains/matrix/backend/{virsh,ssh}.py` + `guest.py` — **prymitywy automatyki
-  VM** (VirshBackend, SshShell, wait_for_agent/shell/session). Harness
-  weryfikacji cel 2 na nich stoi. Przed retirementem: przekuć harness w repo-tool
-  (`visual-check`, plan 7 linia 72), który je formalnie „posiada".
+  VM** (VirshBackend, SshShell, wait_for_agent/shell/session). **Od 2026-08-22 są
+  żywą zależnością `cli visualcheck`** (`cli/visualcheck_cmd.py`), który przekuł
+  harness cel 2 w repo-tool (plan 7 linia 72) — więc te prymitywy zostają na
+  stałe, nie są już „do wycofania".
 
 **Bezpieczne do usunięcia TERAZ (silnik run-flow, w pełni zastąpiony Ansiblem;
 tylko wewnętrzni + testowi konsumenci — analiza potwierdziła zero importów spoza

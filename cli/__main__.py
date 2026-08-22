@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cli.capture_cmd import run_capture
@@ -108,6 +109,41 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_vm_parser(sub)
 
+    p_vc = sub.add_parser(
+        "visualcheck", help="dowód wizualny cel 2: boot → override → zrzut → match markera"
+    )
+    p_vc.add_argument("--golden", required=True, help="ścieżka do golden qcow2")
+    p_vc.add_argument("--component-id", required=True, help="np. GameConqueror.desktop")
+    p_vc.add_argument("--prefix", required=True, help="prefiks plików mediów (np. gimp)")
+    p_vc.add_argument("--media-dir", required=True, help="katalog z <prefix>-*.png (+ marker)")
+    p_vc.add_argument(
+        "--catalog",
+        default="/usr/share/swcatalog/xml/fedora.xml.gz",
+        help="katalog w gościu do podmiany (XML rpm lub DEP-11 YAML)",
+    )
+    p_vc.add_argument(
+        "--store-cmd",
+        default="gnome-software --details={id}",
+        help="szablon otwarcia sklepu; {id} → component-id (np. "
+        "'plasma-discover --application appstream:{id}')",
+    )
+    p_vc.add_argument(
+        "--marker", default=None, help="obraz markera (domyślnie <prefix>-source.png)"
+    )
+    p_vc.add_argument("--out", default="visualcheck.png", help="gdzie zapisać zrzut")
+    p_vc.add_argument("--name", default="sw-visualcheck")
+    p_vc.add_argument("--ssh-port", type=int, default=2222)
+    p_vc.add_argument("--user", default="test")
+    p_vc.add_argument("--key", default=str(Path.home() / ".ssh/screenwright_ubuntu"))
+    p_vc.add_argument("--osinfo", default="fedora40")
+    p_vc.add_argument("--memory", type=int, default=4096)
+    p_vc.add_argument("--media-port", type=int, default=8080)
+    p_vc.add_argument("--threshold", type=float, default=0.03)
+    p_vc.add_argument("--libvirt-uri", default="qemu:///session")
+    p_vc.add_argument(
+        "--work-dir", default=str(Path.home() / ".local/share/screenwright/images/vc")
+    )
+
     return parser
 
 
@@ -126,6 +162,10 @@ def dispatch(args: argparse.Namespace) -> int:
         return run_serve_status(args)
     if args.command == "vm":
         return args.func(args)
+    if args.command == "visualcheck":
+        from cli.visualcheck_cmd import run_visualcheck
+
+        return run_visualcheck(args)
     return 2
 
 

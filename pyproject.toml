@@ -108,6 +108,7 @@ omit = [
     "*/distro_builders/elementary.py",
     "*/ports.py",
     "*/backend/virsh.py",
+    "*/cli/visualcheck_cmd.py",
 ]
 
 [tool.coverage.report]
