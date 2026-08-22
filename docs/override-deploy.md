@@ -31,6 +31,33 @@ po `<id>`, usuwa jego `<screenshots>`, wstawia nasz blok (source + 4 miniatury),
 zachowuje **wszystkie pozostałe komponenty** i zapisuje gz. Obsługuje katalogi
 z domyślnym namespace (Fedora appstream-generator) i bez.
 
+## Powtarzalna weryfikacja: `cli visualcheck`
+
+Cały dowód (boot → override → otwarcie sklepu → `virsh screenshot` → sprawdzenie
+markera) jest jedną komendą (`cli/visualcheck_cmd.py`). Exit 0 ⇔ sklep renderuje
+nasz obraz. Zweryfikowane na żywo 2026-08-22 (Fedora WS: `marker_fraction=0.20`).
+
+```bash
+# GNOME Software (rpm/Fedora)
+python -m cli visualcheck --golden ~/.local/share/screenwright/images/golden/fedora-ws.qcow2 \
+  --component-id GameConqueror.desktop --prefix gimp --media-dir <dir-z-gimp-*.png> \
+  --catalog /usr/share/swcatalog/xml/fedora.xml.gz --osinfo fedora40 --ssh-port 2221
+
+# KDE Discover (rpm/Fedora) — inny sklep, ten sam katalog
+python -m cli visualcheck --golden ~/.local/share/screenwright/images/golden/fedora-kde.qcow2 \
+  --component-id GameConqueror.desktop --prefix gimp --media-dir <dir> \
+  --store-cmd 'plasma-discover --application appstream:{id}' --osinfo fedora40 --ssh-port 2222
+
+# GNOME Software (deb/Ubuntu) — katalog DEP-11 YAML (wykrywany automatycznie)
+python -m cli visualcheck --golden ~/.local/share/screenwright/images/golden/ubuntu-24.04.qcow2 \
+  --component-id <id-niezainstalowanej-appki> --prefix gimp --media-dir <dir> \
+  --catalog /var/lib/swcatalog/yaml/<…dep11…>.yml.gz --osinfo ubuntu24.04 --ssh-port 2223
+```
+
+Weryfikacja markera jest **niezależna od skali** (udział kadru w dominującym
+kolorze markera, `domains.verification.store_shows_marker`) — sklep skaluje zrzut
+w karuzeli, więc template-match po pikselach jest zawodny.
+
 ## Rola `deploy-override` (self-verifying)
 
 1. wgranie obrazów + serwer mediów w gościu (`systemd-run --unit=swmedia --
