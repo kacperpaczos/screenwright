@@ -4,7 +4,7 @@ Renderuje parę plików (user-data + meta-data) dla NoCloud seed ISO. Klucz
 SSH hosta wstrzykiwany jest do user-data jako ``ssh_authorized_keys`` dla
 użytkownika ``test``, co pozwala runnerowi SSH-ować do VM bez hasła.
 
-Ten seed jest **artefaktem budowy, nie runtime'u**. ``vm/build/seed-ubuntu.sh``
+Ten seed jest **artefaktem budowy, nie runtime'u**. ``packer/build-ubuntu.sh``
 robi jednorazowy provisioning boot serwerowego cloud image'a z podpiętym seedem:
 
     noble-server-cloudimg-amd64.img

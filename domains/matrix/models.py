@@ -81,7 +81,7 @@ class DistroSpec(BaseModel):
 
     cloud-init w gościu szuka wolumenu z etykietą ``cidata``; bez podpięcia
     seed ISO do domeny (a nie tylko na czas ``virt-customize``) user-data
-    nigdy nie zostanie zaaplikowane. Patrz ``vm/build/seed-ubuntu.sh``.
+    nigdy nie zostanie zaaplikowane. Konsument: ``packer/build-ubuntu.sh`` (Packer).
     """
 
     @field_validator("golden_image", "build_artifact", "seed_iso", mode="after")
