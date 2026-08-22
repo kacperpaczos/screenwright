@@ -1,0 +1,7 @@
+---
+- name: Kolektory odpowiadają
+  hosts: collectors
+  gather_facts: false
+  tasks:
+    - name: ping
+      ansible.builtin.ping:

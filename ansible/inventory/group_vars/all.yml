@@ -1,0 +1,24 @@
+---
+# Kolektory (docs/plans/7-stack-transformation.md). Egress przez passt (usermode,
+# bezrootowy); SSH na 127.0.0.1:<ssh_port> przekierowany przez passt do 22 gościa.
+libvirt_uri: "qemu:///session"
+image_root: "{{ ansible_env.HOME }}/.local/share/screenwright/images"
+pool_dir: "{{ image_root }}/collectors"
+guest_user: test
+ssh_public_key_file: "{{ ansible_env.HOME }}/.ssh/screenwright_ubuntu.pub"
+
+collectors:
+  fedora:
+    base_image: "/var/lib/libvirt/images/golden/fedora-cloud-44.qcow2"
+    ssh_port: 2201
+    memory: 2048
+    vcpus: 2
+    disk_gb: 20
+    os_variant: fedora40
+  ubuntu:
+    base_image: "{{ ansible_env.HOME }}/.local/share/screenwright/images/golden/.cache-noble-server-cloudimg-amd64.img"
+    ssh_port: 2202
+    memory: 2048
+    vcpus: 2
+    disk_gb: 20
+    os_variant: ubuntu24.04

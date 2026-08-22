@@ -1,0 +1,11 @@
+---
+# Cel 1: katalogi aplikacji w formatach dystrybucji + media snapd → pliki na hoście.
+# Parsowanie i indeks robi Python (domains/corpus) z provenance=guest:<distro>.
+- name: Zbierz katalogi sklepów z wnętrza dystrybucji
+  hosts: collectors
+  become: true
+  vars:
+    collect_dir: "{{ playbook_dir }}/../../corpus/guest"
+  roles:
+    - store-tools
+    - collect-catalog

@@ -1,0 +1,73 @@
+---
+# Narzędzia i katalogi sklepów. Idempotentne: drugi przebieg nic nie instaluje.
+- name: IPv4-only — sieć NAT libvirta nie ma IPv6, a mirrory mają AAAA (dnf/apt/flatpak wisiałyby do timeoutu)
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-screenwright-ipv4-only.conf
+    mode: "0644"
+    content: |
+      net.ipv6.conf.all.disable_ipv6 = 1
+      net.ipv6.conf.default.disable_ipv6 = 1
+  notify: reload sysctl
+
+- name: Zastosuj sysctl od razu
+  ansible.builtin.command:
+    cmd: sysctl -q -w net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1
+  changed_when: false
+
+- name: Fedora — dnf po IPv4
+  when: distro == "fedora"
+  ansible.builtin.lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: "^ip_resolve="
+    line: "ip_resolve=4"
+
+- name: Ubuntu — apt po IPv4
+  when: distro == "ubuntu"
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/99force-ipv4
+    mode: "0644"
+    content: 'Acquire::ForceIPv4 "true";'
+
+- name: Fedora — appstream, katalog dystrybucji, flatpak + Flathub
+  when: distro == "fedora"
+  ansible.builtin.dnf:
+    name:
+      - appstream
+      - appstream-data
+      - flatpak
+      - fedora-flathub-remote
+    state: present
+
+- name: Ubuntu — appstream (włącza DEP-11 w apt), flatpak
+  when: distro == "ubuntu"
+  ansible.builtin.apt:
+    name:
+      - appstream
+      - flatpak
+    state: present
+    update_cache: true
+
+- name: Ubuntu — apt update po instalacji appstream ściąga DEP-11 Components
+  when: distro == "ubuntu"
+  ansible.builtin.apt:
+    update_cache: true
+  changed_when: false
+
+- name: Flathub jako remote systemowy (Fedora ma go z fedora-flathub-remote)
+  ansible.builtin.command:
+    cmd: flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+  register: flathub_add
+  changed_when: "'Added' in (flathub_add.stderr + flathub_add.stdout)"
+  failed_when: flathub_add.rc != 0 and 'already exists' not in flathub_add.stderr
+
+- name: Odśwież appstream remote'ów flatpak
+  ansible.builtin.command:
+    cmd: flatpak update --appstream --system -y --noninteractive
+  changed_when: false
+
+- name: Fedora — odśwież katalog AppStream (appstreamcli refresh --force)
+  when: distro == "fedora"
+  ansible.builtin.command:
+    cmd: appstreamcli refresh --force
+  changed_when: false
+  failed_when: false

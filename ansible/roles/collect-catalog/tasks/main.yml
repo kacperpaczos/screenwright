@@ -1,0 +1,82 @@
+---
+# Surowe katalogi w formacie źródła + odpowiedzi snapd → {{ collect_dir }}/<distro>/...
+- name: Katalog wynikowy na hoście
+  ansible.builtin.file:
+    path: "{{ collect_dir }}/{{ distro }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Znajdź pliki katalogów AppStream (rpm/deb) i flatpak
+  ansible.builtin.find:
+    paths:
+      - /usr/share/swcatalog/xml
+      - /var/lib/swcatalog/xml
+      - /var/cache/swcatalog/yaml
+      - /var/lib/apt/lists
+      - /var/lib/flatpak/appstream
+    patterns:
+      - "*.xml.gz"
+      - "*dep11_Components-amd64.yml.gz"
+      - "appstream.xml.gz"
+    recurse: true
+    file_type: file
+  register: catalog_files
+
+# flat: false — ścieżka gościa zostaje pod {{ collect_dir }}/<distro>/<host>/...,
+# bo dwa remote'y flatpak mają ten sam `appstream.xml.gz`, a importer rozpoznaje
+# format po ścieżce (/usr/share/swcatalog, /var/lib/apt/lists, /var/lib/flatpak/appstream/<remote>).
+- name: Pobierz katalogi na hosta
+  ansible.builtin.fetch:
+    src: "{{ item.path }}"
+    dest: "{{ collect_dir }}/{{ distro }}/"
+    flat: false
+  loop: "{{ catalog_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: snapd — kategorie (tylko tam, gdzie jest snapd)
+  when: distro == "ubuntu"
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -sS --unix-socket /run/snapd.socket http://localhost/v2/categories > /tmp/snap-categories.json
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: snapd — find per kategoria (media w odpowiedzi)
+  when: distro == "ubuntu"
+  ansible.builtin.script:
+    cmd: snap-find-all.sh /tmp/snap-find
+  changed_when: false
+
+- name: snapd — pobierz odpowiedzi na hosta
+  when: distro == "ubuntu"
+  ansible.builtin.shell: |
+    set -o pipefail
+    cd /tmp && tar czf /tmp/snap-find.tgz snap-categories.json snap-find
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: snapd — fetch
+  when: distro == "ubuntu"
+  ansible.builtin.fetch:
+    src: /tmp/snap-find.tgz
+    dest: "{{ collect_dir }}/{{ distro }}/"
+    flat: true
+
+- name: Manifest zebrania
+  ansible.builtin.copy:
+    dest: "{{ collect_dir }}/{{ distro }}/manifest.json"
+    mode: "0644"
+    content: |
+      {
+        "distro": "{{ distro }}",
+        "host": "{{ inventory_hostname }}",
+        "collected_at": "{{ ansible_date_time.iso8601 }}",
+        "files": {{ catalog_files.files | map(attribute='path') | list | to_json }}
+      }
+  delegate_to: localhost
+  become: false

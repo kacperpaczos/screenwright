@@ -1,0 +1,28 @@
+#cloud-config
+hostname: collector-{{ item.key }}
+manage_etc_hosts: true
+users:
+  - name: {{ guest_user }}
+    groups: [wheel, sudo, adm]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+      - "{{ ssh_pubkey }}"
+ssh_pwauth: false
+# Sieć passt jest tylko IPv4; mirrory publikują AAAA i bez tego dnf/apt/flatpak
+# wiszą na IPv6 do timeoutu.
+write_files:
+  - path: /etc/sysctl.d/90-screenwright-ipv4-only.conf
+    content: |
+      net.ipv6.conf.all.disable_ipv6 = 1
+      net.ipv6.conf.default.disable_ipv6 = 1
+  - path: /etc/dnf/dnf.conf
+    append: true
+    content: |
+      ip_resolve=4
+  - path: /etc/apt/apt.conf.d/99force-ipv4
+    content: |
+      Acquire::ForceIPv4 "true";
+runcmd:
+  - [sysctl, --system]

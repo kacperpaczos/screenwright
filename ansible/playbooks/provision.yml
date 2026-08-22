@@ -1,0 +1,12 @@
+---
+- name: Postaw kolektory (virt-install + passt na qemu:///session)
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: Prowizjonuj każdy kolektor
+      ansible.builtin.include_role:
+        name: provision-collector
+      loop: "{{ collectors | dict2items }}"
+      loop_control:
+        label: "collector-{{ item.key }}"

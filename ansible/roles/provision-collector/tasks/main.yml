@@ -1,0 +1,85 @@
+---
+# Prowizjonuje jedną maszynę collector-<distro> na qemu:///session + passt.
+# Decyzja 2026-08-22: virt-install zamiast Terraforma (provider nie trafia w session).
+- name: Pula na dysku (katalog w HOME — session libvirtd nie ma praw do /var/lib/libvirt)
+  ansible.builtin.file:
+    path: "{{ pool_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Wczytaj klucz publiczny
+  ansible.builtin.set_fact:
+    ssh_pubkey: "{{ lookup('file', ssh_public_key_file) | trim }}"
+
+- name: Stan istniejącej domeny
+  ansible.builtin.command:
+    cmd: "virsh -c {{ libvirt_uri }} domstate collector-{{ item.key }}"
+  register: domstate
+  changed_when: false
+  failed_when: false
+
+- name: Overlay na cloud image (backing) — świeży tylko gdy domeny jeszcze nie ma
+  when: domstate.rc != 0
+  ansible.builtin.command:
+    cmd: >-
+      qemu-img create -f qcow2 -F qcow2
+      -b {{ item.value.base_image }}
+      {{ pool_dir }}/collector-{{ item.key }}.qcow2
+      {{ item.value.disk_gb }}G
+    creates: "{{ pool_dir }}/collector-{{ item.key }}.qcow2"
+
+- name: Katalog seeda NoCloud
+  when: domstate.rc != 0
+  ansible.builtin.file:
+    path: "{{ pool_dir }}/seed-{{ item.key }}"
+    state: directory
+    mode: "0755"
+
+- name: user-data (klucz SSH, użytkownik, IPv4-only)
+  when: domstate.rc != 0
+  ansible.builtin.template:
+    src: user-data.yaml.j2
+    dest: "{{ pool_dir }}/seed-{{ item.key }}/user-data"
+    mode: "0644"
+
+- name: meta-data
+  when: domstate.rc != 0
+  ansible.builtin.copy:
+    dest: "{{ pool_dir }}/seed-{{ item.key }}/meta-data"
+    mode: "0644"
+    content: |
+      instance-id: collector-{{ item.key }}
+      local-hostname: collector-{{ item.key }}
+
+- name: Zbuduj seed.iso (etykieta cidata; xorrisofs — cloud-localds wymaga genisoimage, którego nie ma)
+  when: domstate.rc != 0
+  ansible.builtin.command:
+    cmd: >-
+      xorrisofs -quiet -output {{ pool_dir }}/collector-{{ item.key }}-seed.iso
+      -volid cidata -joliet -rock
+      {{ pool_dir }}/seed-{{ item.key }}/user-data
+      {{ pool_dir }}/seed-{{ item.key }}/meta-data
+    creates: "{{ pool_dir }}/collector-{{ item.key }}-seed.iso"
+
+- name: virt-install --import (persistent, passt egress, SSH na 127.0.0.1:{{ item.value.ssh_port }})
+  when: domstate.rc != 0
+  ansible.builtin.command:
+    cmd: >-
+      virt-install --connect {{ libvirt_uri }}
+      --name collector-{{ item.key }}
+      --memory {{ item.value.memory }} --vcpus {{ item.value.vcpus }}
+      --import
+      --disk path={{ pool_dir }}/collector-{{ item.key }}.qcow2,format=qcow2,bus=virtio
+      --disk path={{ pool_dir }}/collector-{{ item.key }}-seed.iso,device=cdrom,readonly=on
+      --network user,backend.type=passt,portForward0.proto=tcp,portForward0.address=127.0.0.1,portForward0.range0.start={{ item.value.ssh_port }},portForward0.range0.to=22
+      --osinfo name={{ item.value.os_variant }}
+      --graphics none --noautoconsole --wait 0
+  register: virtinstall
+  changed_when: "'Domain creation completed' in virtinstall.stdout or virtinstall.rc == 0"
+
+- name: Upewnij się, że domena działa (po istniejącej mogła być zgaszona)
+  ansible.builtin.command:
+    cmd: "virsh -c {{ libvirt_uri }} start collector-{{ item.key }}"
+  register: startres
+  changed_when: "'started' in startres.stdout"
+  failed_when: startres.rc != 0 and 'already active' not in (startres.stderr | default(''))
