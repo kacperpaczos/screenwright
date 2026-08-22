@@ -58,9 +58,33 @@ cd ansible && ansible-playbook playbooks/deploy-override.yml \
 2. **Fetch (behawioralne):** instrumentowany serwer (`/var/tmp/swmedia-access.log`)
    loguje `GET /gimp-624x351.png` od GNOME Software — sklep czyta podmieniony
    katalog i pobiera **nasz** obraz z naszego serwera.
-3. **Piksel:** `virsh screenshot` + próg crimson daje frac **0.20** (vs 0.0002 przy
-   oryginale). Zrzut: `~/.local/share/screenwright/images/cel2/cel2-PROOF-store-shows-ours.png`
-   (before: `cel2-before-original-screenshot.png`).
+3. **Piksel na DWÓCH sklepach (ten sam patch katalogu rpm):**
+   - **GNOME Software 50** (GTK): crimson frac **0.20**
+     (`images/cel2/cel2-PROOF-store-shows-ours.png`).
+   - **KDE Discover** (Qt): crimson frac **0.16**
+     (`images/cel2/cel2-PROOF-discover-shows-ours.png`).
+   Oba czytają ten sam `/usr/share/swcatalog` → **podmiana jest per platforma
+   (katalog libappstream), nie per sklep.**
+
+## Platformy: gdzie i jak podmieniać (protokół, zweryfikowany 2026-08-22)
+
+`patch_catalog` / `cli override --patch` wykrywa format katalogu po treści i
+obsługuje **oba** źródła, które sklepy libappstream czytają:
+
+| Platforma | Katalog, który czyta sklep | Metoda override | Stan |
+| --- | --- | --- | --- |
+| **rpm** (Fedora) | `/usr/share/swcatalog/xml/fedora.xml.gz` (AppStream XML) | patch `<screenshots>` in-place | **piksel** na GNOME Software + KDE Discover |
+| **deb** (Ubuntu) | `/var/lib/swcatalog/yaml/…dep11…yml.gz` (DEP-11 YAML) | patch `Screenshots:` in-place (URL-e absolutne → `MediaBaseUrl` pomijany) | **dane**: `appstreamcli dump` = nasz 1 zrzut (`screenshots=1`, `mediabaseurl_prepended=0`) |
+| **flatpak** (Flathub) | osobny appstream per-remote | override w danych remote'u | poza zakresem patcha katalogu OS |
+| **snap** | snapd REST / snap store API (`dashboard.snapcraft.io`) | brak — snap omija AppStream | granica: nie da się patchem katalogu |
+
+**Ważny niuans (deb, zweryfikowany):** dla aplikacji **zainstalowanej**
+gnome-software czyta LOKALNE `metainfo` aplikacji, nie pobrany katalog DEP-11 —
+override katalogu wtedy nie zmienia karuzeli. Testować na aplikacji
+**niezainstalowanej** (jedynym źródłem metadanych jest katalog). Na golden Ubuntu
+24.04 gnome-software ma dodatkowo problem z ładowaniem zdalnych mediów (broken
+także dla ikony aplikacji) — piksel deb niepotwierdzony środowiskowo, ale warstwa
+danych (to, co renderuje każdy libappstream-store) jest jednoznaczna.
 
 ## Pułapki karuzeli GNOME Software (potwierdzone na żywo)
 

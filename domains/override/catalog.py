@@ -2,6 +2,7 @@
 
 import gzip
 from pathlib import Path
+from typing import Any
 from xml.etree.ElementTree import (
     Element,
     ElementTree,
@@ -11,6 +12,7 @@ from xml.etree.ElementTree import (
     tostring,
 )
 
+import yaml
 from shared.logging import log_entry
 
 from domains.override.models import CatalogPatchResult, OverrideResult, OverrideSpec
@@ -150,69 +152,122 @@ def _build_screenshots(
     return shots
 
 
+def _is_dep11(payload: bytes) -> bool:
+    """DEP-11 (Ubuntu/Debian) to YAML; AppStream Fedory to XML."""
+    head = payload.lstrip()[:200]
+    if head.startswith(b"<"):
+        return False
+    return b"DEP-11" in payload[:400] or head.startswith(b"---") or head.startswith(b"File:")
+
+
+def _build_dep11_screenshot(
+    base_url: str, prefix: str, caption: str, width: int, height: int
+) -> dict[str, Any]:
+    """Blok Screenshots[0] w kształcie DEP-11 (URL-e absolutne → MediaBaseUrl pomijany)."""
+    base = base_url.rstrip("/")
+    return {
+        "default": True,
+        "caption": {"C": caption},
+        "source-image": {"url": f"{base}/{prefix}-source.png", "width": width, "height": height},
+        "thumbnails": [
+            {"url": f"{base}/{prefix}-{w}x{h}.png", "width": w, "height": h} for w, h in THUMBNAILS
+        ],
+    }
+
+
+def _patch_dep11(
+    payload: bytes, spec: OverrideSpec, width: int, height: int
+) -> tuple[bytes, int] | None:
+    """Podmienia Screenshots komponentu w wielodokumentowym DEP-11 YAML.
+
+    Zwraca (bajty gz-owalne, ile bloków podmieniono) albo None, gdy komponentu
+    o danym ID nie ma w tym pliku.
+    """
+    docs = list(yaml.safe_load_all(payload.decode("utf-8", errors="replace")))
+    replaced = 0
+    for doc in docs:
+        if isinstance(doc, dict) and doc.get("ID") == spec.component_id:
+            replaced += len(doc.get("Screenshots", []) or [])
+            doc["Screenshots"] = [
+                _build_dep11_screenshot(spec.base_url, spec.prefix, spec.caption, width, height)
+            ]
+    if not any(isinstance(d, dict) and d.get("ID") == spec.component_id for d in docs):
+        return None
+    out = yaml.safe_dump_all(
+        docs, default_flow_style=False, allow_unicode=True, sort_keys=False
+    ).encode("utf-8")
+    return out, replaced
+
+
 def patch_catalog(
     spec: OverrideSpec,
     *,
     loader: CatalogLoader,
 ) -> CatalogPatchResult:
-    """Podmienia <screenshots> komponentu W SAMYM katalogu bazowym (in-place).
+    """Podmienia zrzuty komponentu W SAMYM katalogu bazowym (in-place).
 
     W przeciwieństwie do :func:`build_override` (osobny plik z priorytetem, który
-    libappstream tylko UNIONuje ze zrzutami bazy), tu przepisujemy blok
-    ``<screenshots>`` docelowego komponentu wewnątrz katalogu i zapisujemy CAŁY
-    katalog z powrotem. Dzięki temu `appstreamcli dump` zwraca DOKŁADNIE nasz
-    zrzut, a sklep renderuje nasz obraz zamiast oryginału. Weryfikowane na żywo
-    2026-08-22 (GNOME Software 50, Fedora WS).
+    libappstream tylko UNIONuje ze zrzutami bazy), tu przepisujemy blok zrzutów
+    docelowego komponentu wewnątrz katalogu i zapisujemy CAŁY katalog z powrotem.
+    Dzięki temu `appstreamcli dump` zwraca DOKŁADNIE nasz zrzut, a sklep renderuje
+    nasz obraz zamiast oryginału. Weryfikowane na żywo 2026-08-22 (GNOME Software
+    50 i KDE Discover na Fedorze — katalog XML).
 
-    Czyta pierwszy odczytywalny katalog z ``spec.catalog_paths`` i zapisuje wynik
-    do ``spec.out`` (gz, gdy rozszerzenie ``.gz``). ``spec.out`` może wskazywać na
-    ten sam plik co źródło (podmiana w miejscu).
+    Obsługuje oba formaty katalogu: **AppStream XML** (rpm/Fedora, `<screenshots>`)
+    i **DEP-11 YAML** (deb/Ubuntu, `Screenshots:`) — format wykrywany po treści.
+    Czyta pierwszy odczytywalny katalog z ``spec.catalog_paths`` zawierający
+    komponent i zapisuje wynik do ``spec.out`` (gz, gdy rozszerzenie ``.gz``).
+    ``spec.out`` może wskazywać na ten sam plik co źródło (podmiana w miejscu).
     """
     width, height = spec.source_size
-    source_catalog: Path | None = None
-    root: Element | None = None
     for catalog in spec.catalog_paths:
         try:
             payload = loader.load(catalog)
         except OSError as exc:
             log_entry(20, "override.catalog_unreadable", path=str(catalog), error=str(exc))
             continue
-        candidate_root = fromstring(payload)
-        for component in candidate_root:
-            cid = _first_child(component, "id")
-            if cid is not None and cid.text == spec.component_id:
-                source_catalog = catalog
-                root = candidate_root
-                target = component
-                break
-        if root is not None:
-            break
-    if root is None or source_catalog is None:
-        raise LookupError(
-            f"component {spec.component_id} not found in {[str(p) for p in spec.catalog_paths]}"
+
+        if _is_dep11(payload):
+            result = _patch_dep11(payload, spec, width, height)
+            if result is None:
+                continue
+            data, removed = result
+        else:
+            candidate_root = fromstring(payload)
+            target = next(
+                (
+                    c
+                    for c in candidate_root
+                    if (cid := _first_child(c, "id")) is not None and cid.text == spec.component_id
+                ),
+                None,
+            )
+            if target is None:
+                continue
+            ns = _ns_prefix(target)
+            removed = _strip_screenshots(target)
+            target.append(
+                _build_screenshots(spec.base_url, spec.prefix, spec.caption, width, height, ns=ns)
+            )
+            indent(candidate_root, space="  ")
+            data = tostring(candidate_root, encoding="UTF-8", xml_declaration=True)
+
+        log_entry(20, "override.patch_component_found", path=str(catalog), id=spec.component_id)
+        spec.out.parent.mkdir(parents=True, exist_ok=True)
+        if spec.out.suffix == ".gz":
+            with gzip.open(spec.out, "wb") as fh:
+                fh.write(data)
+        else:
+            spec.out.write_bytes(data)
+        return CatalogPatchResult(
+            out_path=spec.out,
+            catalog_path=catalog,
+            component_id=spec.component_id,
+            replaced_screenshots=removed,
         )
 
-    log_entry(20, "override.patch_component_found", path=str(source_catalog), id=spec.component_id)
-    ns = _ns_prefix(target)
-    removed = _strip_screenshots(target)
-    target.append(
-        _build_screenshots(spec.base_url, spec.prefix, spec.caption, width, height, ns=ns)
-    )
-
-    indent(root, space="  ")
-    data = tostring(root, encoding="UTF-8", xml_declaration=True)
-    spec.out.parent.mkdir(parents=True, exist_ok=True)
-    if spec.out.suffix == ".gz":
-        with gzip.open(spec.out, "wb") as fh:
-            fh.write(data)
-    else:
-        spec.out.write_bytes(data)
-
-    return CatalogPatchResult(
-        out_path=spec.out,
-        catalog_path=source_catalog,
-        component_id=spec.component_id,
-        replaced_screenshots=removed,
+    raise LookupError(
+        f"component {spec.component_id} not found in {[str(p) for p in spec.catalog_paths]}"
     )
 
 
