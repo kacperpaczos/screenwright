@@ -122,8 +122,10 @@ calls `virsh` and requires `libvirtd` on the host.
 
 ## Documentation
 
+- `docs/platform-notes.md` — hard-won host/VM/store facts (gotchas reference)
 - `docs/where-screenshots-come-from.md` — sources of screenshots in stores
 - `docs/appstream-overrides.md` — why `merge="replace"` doesn't work
+- `docs/override-deploy.md` — cel 2: replacing store screenshots end-to-end
 - `docs/capture.md` — headless capture design
 - `docs/verification.md` — end-to-end verification log
 - `docs/architecture.md` — bounded contexts, dependency rules
