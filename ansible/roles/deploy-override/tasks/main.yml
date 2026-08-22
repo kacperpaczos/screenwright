@@ -1,7 +1,14 @@
 ---
-# Wstrzykuje override AppStream do prawdziwej dystrybucji i sprawia, że sklep go widzi.
-# Zweryfikowane 2026-08-22 na Fedorze WS: po tych krokach `appstreamcli dump <id>`
-# zwraca nasz URL zrzutu (priority=1), a GNOME Software pobiera nasz obraz po HTTP.
+# Wstrzykuje NASZ zrzut do prawdziwej dystrybucji tak, że sklep go RENDERUJE.
+#
+# Kluczowe (zweryfikowane na żywo 2026-08-22, GNOME Software 50, Fedora WS):
+# libappstream UNIONuje listy <screenshots> komponentów o tym samym <id> z różnych
+# katalogów, a merge="replace" jest ignorowany przez `appstreamcli refresh`. Osobny
+# plik override (priority=1) tylko DODAJE nasz zrzut obok oryginału — sklep pokazuje
+# bazowy pierwszy. Jedyne, co daje „tylko nasz", to podmiana bloku <screenshots>
+# W SAMYM katalogu bazowym (`cli override --patch`). Dlatego: pobierz katalog z gościa,
+# przepisz go naszym kodem na węźle sterującym, odeślij, odśwież, zweryfikuj.
+
 - name: Katalog mediów w gościu
   ansible.builtin.file:
     path: "{{ override_media_dir }}"
@@ -27,10 +34,40 @@
   changed_when: "'Running as unit' in (swmedia.stderr + swmedia.stdout)"
   failed_when: swmedia.rc != 0 and 'already exists' not in (swmedia.stderr | default(''))
 
-- name: Wgraj override do katalogu AppStream (priority=1)
+- name: Kopia zapasowa katalogu bazowego (idempotentnie)
   ansible.builtin.copy:
-    src: "{{ override_xml_gz }}"
-    dest: "{{ override_catalog_dir }}/{{ override_filename }}"
+    src: "{{ override_base_catalog }}"
+    dest: "{{ override_base_catalog }}.screenwright-orig"
+    remote_src: true
+    force: false
+    mode: "0644"
+  become: true
+
+- name: Pobierz katalog bazowy z gościa na węzeł sterujący
+  ansible.builtin.fetch:
+    src: "{{ override_base_catalog }}"
+    dest: "{{ override_workdir }}/{{ inventory_hostname }}/base-catalog.xml.gz"
+    flat: true
+
+- name: Podmień <screenshots> komponentu w katalogu (naszym, przetestowanym kodem)
+  ansible.builtin.command:
+    cmd: >-
+      python3 -m cli override --patch
+      --id {{ override_component_id }}
+      --base-url http://127.0.0.1:{{ override_media_port }}
+      --prefix {{ override_prefix }}
+      --catalog {{ override_workdir }}/{{ inventory_hostname }}/base-catalog.xml.gz
+      --out {{ override_workdir }}/{{ inventory_hostname }}/patched-catalog.xml.gz
+  delegate_to: localhost
+  become: false
+  args:
+    chdir: "{{ screenwright_repo }}"
+  changed_when: true
+
+- name: Odeślij spatchowany katalog do gościa (podmiana w miejscu)
+  ansible.builtin.copy:
+    src: "{{ override_workdir }}/{{ inventory_hostname }}/patched-catalog.xml.gz"
+    dest: "{{ override_base_catalog }}"
     mode: "0644"
   become: true
 
@@ -40,15 +77,25 @@
   become: true
   changed_when: true
 
-- name: Potwierdź, że katalog sklepu widzi nasz zrzut
+- name: Odczytaj metadane, które czyta sklep
   ansible.builtin.command:
     cmd: appstreamcli dump {{ override_component_id }}
   register: dump
   changed_when: false
   failed_when: false
 
-- name: Nasz URL zrzutu jest w metadanych, które czyta sklep
+- name: Nasz zrzut JEST w katalogu sklepu
   ansible.builtin.assert:
-    that: "('127.0.0.1:' ~ override_media_port) in dump.stdout"
-    success_msg: "override widoczny dla sklepu ({{ override_component_id }})"
-    fail_msg: "override NIE trafił do katalogu sklepu — sprawdź plik i appstreamcli refresh"
+    that:
+      - "('127.0.0.1:' ~ override_media_port ~ '/' ~ override_prefix ~ '-source.png') in dump.stdout"
+    fail_msg: "override NIE trafił do katalogu sklepu — sprawdź patch i appstreamcli refresh"
+    success_msg: "nasz zrzut widoczny dla sklepu ({{ override_component_id }})"
+
+- name: To JEDYNY zrzut komponentu (podmiana, nie union z oryginałem)
+  ansible.builtin.assert:
+    that:
+      - "(dump.stdout | regex_findall('<screenshot ') | length) == 1"
+    fail_msg: >-
+      komponent ma >1 <screenshot> — libappstream zunionował oryginał z naszym.
+      Patch musi przepisać katalog bazowy w miejscu, nie dokładać osobnego pliku.
+    success_msg: "komponent renderuje wyłącznie nasz zrzut"

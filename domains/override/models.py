@@ -31,4 +31,15 @@ class OverrideResult(BaseModel):
     replaced_screenshots: int = Field(ge=0)
 
 
-__all__ = ["OverrideResult", "OverrideSpec"]
+class CatalogPatchResult(BaseModel):
+    """Wynik podmiany zrzutów w SAMYM katalogu bazowym (patch_catalog)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    out_path: Path
+    catalog_path: Path
+    component_id: ComponentId
+    replaced_screenshots: int = Field(ge=0)
+
+
+__all__ = ["CatalogPatchResult", "OverrideResult", "OverrideSpec"]

@@ -1,10 +1,16 @@
 ---
-# Katalog AppStream w gościu, do którego wstawiamy override (priority=1).
+# Katalog AppStream w gościu, który przepisujemy w miejscu (podmiana <screenshots>).
 override_catalog_dir: /usr/share/swcatalog/xml
-override_filename: 90-screenwright.xml.gz
-# Lokalny (w gościu) serwer mediów, na który wskazują URL-e w override.
+override_base_catalog: /usr/share/swcatalog/xml/fedora.xml.gz
+# Komponent i prefiks nazw plików obrazów (np. gimp -> gimp-source.png, gimp-624x351.png).
+override_component_id: GameConqueror.desktop
+override_prefix: gimp
+# Lokalny (w gościu) serwer mediów, na który wskazują URL-e w przepisanym katalogu.
 override_media_dir: /var/tmp/swmedia
 override_media_port: 8080
-# Pliki do wgrania: override_xml_gz (lokalny .xml.gz) + override_media (lista lokalnych obrazów).
-override_xml_gz: ""
+# Lista lokalnych obrazów do wgrania (source + miniatury: <prefix>-source.png, <prefix>-<w>x<h>.png).
 override_media: []
+# Ścieżka repo screenwright na węźle sterującym (tam odpalamy `python -m cli override --patch`).
+screenwright_repo: "{{ playbook_dir }}/.."
+# Katalog roboczy na węźle sterującym (pobrany + spatchowany katalog per host).
+override_workdir: /tmp/screenwright-override

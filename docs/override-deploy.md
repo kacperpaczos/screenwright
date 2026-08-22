@@ -1,101 +1,92 @@
 # Cel 2: podmiana zrzutów w prawdziwym sklepie
 
-Stan 2026-08-22 (Faza 4, increment 1). Rola `ansible/roles/deploy-override`.
+Stan **2026-08-22 — ZAMKNIĘTE end-to-end, także wizualnie.** GNOME Software 50
+na Fedorze WS renderuje w karuzeli **nasz** zrzut zamiast katalogowego.
+Rola `ansible/roles/deploy-override`, kod `domains/override` (`patch_catalog`).
 
-## Co działa (zweryfikowane na Fedorze WS)
+## Metoda, która działa: podmiana w SAMYM katalogu bazowym
 
-Wstrzyknięcie override AppStream (`priority=1`, wygenerowany przez
-`cli override` z zebranego katalogu) do działającej dystrybucji:
+Kluczowe odkrycie (zweryfikowane na żywo): **libappstream UNIONuje listy
+`<screenshots>` komponentów o tym samym `<id>` z różnych katalogów.** Skutki:
 
-1. wgranie `90-screenwright.xml.gz` do `/usr/share/swcatalog/xml/`,
-2. serwer obrazów w gościu (`systemd-run -- python3 -m http.server`),
-3. `appstreamcli refresh --force`.
+- osobny plik override (`cli override` bez `--patch`, `priority=1`) tylko **DODAJE**
+  nasz zrzut obok oryginału — `appstreamcli dump <id>` pokazuje 2 zrzuty, a sklep
+  renderuje bazowy pierwszy;
+- `merge="replace"` (nawet z `version="0.8"`, `type="desktop"`) jest **po cichu
+  ignorowany** przez `appstreamcli refresh`/pool — wynik: tylko bazowy zrzut.
 
-**Dowód (self-verifying w roli):** `appstreamcli dump <id>` — czyli metadane,
-które czyta sklep — zwraca **nasz** URL zrzutu zamiast katalogowego. Ponadto log
-serwera pokazuje, że **GNOME Software pobrał nasz obraz po HTTP**
-(`GET /gimp-source.png`). Rola kończy się asercją, że nasz URL jest w dump.
-
-Uruchomienie:
+Jedyne, co daje „sklep pokazuje **wyłącznie** nasz zrzut", to **przepisanie bloku
+`<screenshots>` docelowego komponentu wewnątrz katalogu bazowego**
+(`/usr/share/swcatalog/xml/fedora.xml.gz`) i zapis całego katalogu z powrotem:
 
 ```bash
-python -m cli override --id <ID> --base-url http://127.0.0.1:8080 --prefix p \
-  --priority 1 --catalog corpus/guest/fedora/**/fedora.xml.gz --out ov.xml
-gzip -c ov.xml > ov.xml.gz
-cd ansible && ansible-playbook playbooks/deploy-override.yml \
-  -e override_component_id=<ID> -e override_xml_gz=<abs>/ov.xml.gz \
-  -e '{"override_media": ["<abs>/p-source.png", ...]}'
+python -m cli override --patch \
+  --id GameConqueror.desktop \
+  --base-url http://127.0.0.1:8080 --prefix gimp \
+  --catalog /path/to/fedora.xml.gz --out /path/to/fedora.xml.gz
 ```
 
-## Co wymaga dopracowania (chrome sklepu, nie mechanizm)
+`patch_catalog` (`domains/override/catalog.py`) czyta katalog, znajduje komponent
+po `<id>`, usuwa jego `<screenshots>`, wstawia nasz blok (source + 4 miniatury),
+zachowuje **wszystkie pozostałe komponenty** i zapisuje gz. Obsługuje katalogi
+z domyślnym namespace (Fedora appstream-generator) i bez.
 
-Wizualne potwierdzenie w karuzeli (zrzut framebuffera pokazujący nasz obraz)
-utrudnia chrome GNOME Software, nie sama podmiana:
+## Rola `deploy-override` (self-verifying)
 
-- **domyślny wariant.** Dla aplikacji dostępnej i jako rpm, i jako flatpak
-  (np. GIMP) GNOME Software domyślnie pokazuje **flatpaka** (źródło „Fedora
-  Flatpaks") — z zrzutami Flathuba, poza zasięgiem override AppStream rpm.
-  Żeby zmienić to, co widzi użytkownik, override musi celować w **wariant, który
-  sklep wyświetla** (flatpak → poza AppStream; rpm → działa, gdy to jedyny albo
-  wybrany wariant). Aplikacje tylko-rpm (597 w katalogu Fedory) pokazują wariant
-  rpm od razu.
-- **modal „Enable Third Party Software Repositories?"** zasłania karuzelę przy
-  pierwszym uruchomieniu.
-- **wygaszanie ekranu** (DPMS) gasi framebuffer po bezczynności — profil wizualny
-  musi mieć wyłączone `idle-delay`/blank.
-- **cache zrzutów** GNOME Software (`~/.cache/gnome-software`) trzeba wyczyścić,
-  by przerysował po podmianie.
-- **fokus okna.** `gnome-software --details=<id>` uruchomiony przez SSH aktywuje
-  usługę, ale okno nie zawsze wychodzi na pierwszy plan — `virsh screenshot`
-  łapie wtedy przegląd Aktywności, nie stronę sklepu.
+1. wgranie obrazów + serwer mediów w gościu (`systemd-run --unit=swmedia --
+   python3 -m http.server 8080`);
+2. kopia zapasowa katalogu bazowego (`*.screenwright-orig`, idempotentnie);
+3. **pobranie katalogu z gościa → `cli override --patch` na węźle sterującym →
+   odesłanie** (jedno źródło prawdy = przetestowany kod domeny);
+4. `appstreamcli refresh --force`;
+5. **dwie asercje:** nasz `<prefix>-source.png` jest w `appstreamcli dump <id>`
+   **oraz** komponent ma **dokładnie jeden** `<screenshot>` (nie union z oryginałem).
 
-### Próba wizualna 2026-08-22 (grim → gnome-screenshot) i wnioski
+```bash
+cd ansible && ansible-playbook playbooks/deploy-override.yml \
+  -e override_component_id=GameConqueror.desktop -e override_prefix=gimp \
+  -e '{"override_media": ["<abs>/gimp-source.png", "<abs>/gimp-624x351.png", ...]}'
+```
 
-`grim` **nie działa na GNOME/Mutter** (wymaga `wlr-screencopy`, protokołu wlroots
-— GNOME go nie ma). Na GNOME odpowiednikiem „zrzut w sesji" jest `gnome-screenshot`
-albo D-Bus `org.gnome.Shell.Screenshot`. `grim` miałby sens dopiero, gdyby sklep
-uruchamiać pod headless kompozytorem wlroots (`cage`/`sway --headless`) — ale to
-już nie jest prawdziwe środowisko GNOME.
+## Dowód na trzech warstwach (2026-08-22)
 
-Wykonano kilka prób na Fedorze WS. Ustalone twardo:
-- override trafia do metadanych sklepu — `appstreamcli dump <id>` zwraca nasz URL
-  (count=5), powtarzalnie, także dla aplikacji tylko-rpm;
-- w czystym przebiegu serwer mediów oddawał 200, a GNOME Software **pobrał nasz
-  obraz** (`GET /gimp-source.png`).
+1. **Dane (deterministyczne, niezależne od sklepu):** `appstreamcli dump
+   GameConqueror.desktop` — czyli metadane, które czyta każdy sklep oparty na
+   libappstream (GNOME Software, KDE Discover) — daje **dokładnie 1 zrzut = nasz**
+   (`grep -c 8080` = 5 URL-i, `dl.fedoraproject` = 0). Nasz URL jest wkompilowany do
+   `/var/cache/swcatalog/cache/en-US-os-catalog.xb`, który gnome-software mmapuje.
+2. **Fetch (behawioralne):** instrumentowany serwer (`/var/tmp/swmedia-access.log`)
+   loguje `GET /gimp-624x351.png` od GNOME Software — sklep czyta podmieniony
+   katalog i pobiera **nasz** obraz z naszego serwera.
+3. **Piksel:** `virsh screenshot` + próg crimson daje frac **0.20** (vs 0.0002 przy
+   oryginale). Zrzut: `~/.local/share/screenwright/images/cel2/cel2-PROOF-store-shows-ours.png`
+   (before: `cel2-before-original-screenshot.png`).
 
-Czego NIE udało się jeszcze złapać: piksela naszej karuzeli na zrzucie. Powody,
-w kolejności ważności:
-1. **serwer mediów w gościu musi być jednostką systemd** (`systemd-run
-   --unit=swmedia …`) — proces w tle przez SSH (`nohup`/`setsid &`) ginie z
-   zamknięciem kanału, a wtedy sklep dostaje 404 i nie ma czego pokazać;
-2. `gnome-screenshot` trzeba odpalać **w kontekście sesji** (`systemd-run --user
-   -- gnome-screenshot -f …`), nie gołym exec po SSH;
-3. świeży boot (nie `managedsave`/restore) — restore zostawia nieświeże jednostki
-   systemd i stan `/var/tmp`, co psuło serwer mediów;
-4. aplikacja tylko-rpm (wariant rpm od razu; dla dwuwariantowych sklep pokazuje
-   flatpaka), `first-run false` + `idle-delay 0` przed pierwszym startem sklepu,
-   `rm -rf ~/.cache/gnome-software`.
+## Pułapki karuzeli GNOME Software (potwierdzone na żywo)
 
-To jest bounded harness (deterministyczny serwer + zrzut w sesji + świeży boot),
-a nie wada mechanizmu podmiany. Domknięcie = zebranie tych czterech punktów w
-jednym przebiegu i template-match z naszym znacznikiem.
+Nie są wadą podmiany — to specyfika klienta; potrzebne do powtarzalnego zrzutu:
 
-### Wykonalny następny krok dla weryfikacji wizualnej
-
-Zamiast walczyć z framebufferem i fokusem: robić zrzut **w sesji** przez
-`grim` (Wayland) po SSH (łapie konkretne okno, nie cały ekran, i nie zależy od
-tego, czy okno jest na wierzchu w chwili `virsh screenshot`), albo podnieść okno
-przez `gdbus call ... org.gnome.Shell.Eval` przed `virsh screenshot`. Do tego
-aplikacja tylko-rpm (wariant rpm od razu), `first-run false` i `idle-delay 0`
-ustawione przed pierwszym startem sklepu, oraz czyszczenie `~/.cache/gnome-software`.
-
-To są punkty „chrome" znane z Etapu 0 (TODO §6). Domknięcie wizualnej
-weryfikacji = ich obsługa + porównanie template match; mechanizm podmiany jest
-gotowy i zwersjonowany.
+- **pojedyncza instancja.** `gnome-software --details=<id>` do już-działającego
+  procesu pokazuje STARY cache. Trzeba `gnome-software --quit` + `pkill -9` **przed**
+  `rm -rf ~/.cache/gnome-software ~/.local/share/gnome-software`, dopiero potem
+  `systemd-run --user gnome-software --details=<id>`.
+- **modal „Enable Third Party"** zasłania karuzelę. Zdejmowany bez narzędzi gościa
+  przez **`virsh -c qemu:///session send-key <dom> --codeset linux KEY_ESC`**
+  (warstwa wejścia QEMU; `org.gnome.Shell.Eval` jest wyłączony).
+- **zrzut:** `gnome-screenshot` przez `systemd-run --user` **wiesza się** (rc=124);
+  `grim` **nie działa na Mutterze** (wymaga wlroots). Do zrzutu używać **`virsh
+  screenshot`** (framebuffer VNC). Sesja graficzna ma pełne env
+  (`WAYLAND_DISPLAY=wayland-0`, `DISPLAY=:0`), więc GUI z `systemd-run --user` się rysuje.
+- **wariant dwuźródłowy.** Gdy aplikacja jest i jako rpm, i jako flatpak/Flathub,
+  sklep może pokazać zrzut flatpaka (poza AppStream rpm). Patch katalogu rpm celuje
+  w komponent rpm; dla flatpaka/snapa podmiana jest w ich kanałach (patrz niżej).
+- gnome-software **re-enkoduje** pobrane zrzuty do cache — sha pliku w
+  `~/.cache/gnome-software/screenshots` ≠ sha oryginału; porównywać **średni kolor**
+  (`convert … -resize 1x1 txt:-`), nie sha.
 
 ## Konsekwencja (spójna z `screenshot-protocol.md`)
 
-Podmiana przez override AppStream działa dla rpm i deb (per dystrybucja); flatpak
-(Flathub) i snap mają własne, scentralizowane kanały poza zasięgiem override.
-Skuteczna podmiana tego, co widzi użytkownik, jest więc **per wariant/platforma**,
-którą sklep wyświetla — nie globalna.
+Podmiana przez katalog AppStream działa dla **rpm i deb** (per dystrybucja);
+flatpak (Flathub) i snap mają własne, scentralizowane kanały poza zasięgiem
+patcha katalogu. Skuteczna podmiana tego, co widzi użytkownik, jest więc **per
+wariant/platforma**, którą sklep wyświetla — nie globalna.
