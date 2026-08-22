@@ -28,6 +28,10 @@ SourceKind = Literal[
     "debian-screenshots-net",
     "mint-community",
     "elementary-repo",
+    "guest-appstream",
+    "guest-dep11",
+    "guest-flatpak",
+    "guest-snapd",
 ]
 
 

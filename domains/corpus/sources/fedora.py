@@ -19,6 +19,7 @@ Realny kształt (potwierdzony 2026-08-16 z appstream-data-44-1.fc44.noarch.rpm):
 BEZ namespacu — inaczej niż mylnie zakładały wcześniejsze wersje.
 """
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -73,39 +74,67 @@ class FedoraSource:
             return None
 
     def _extract_for_app(self, root: Element, app: AppId) -> list[dict[str, object]]:
-        media_base = root.attrib.get("media_baseurl", "")
-        if media_base and not media_base.endswith("/"):
-            media_base += "/"
-        target = strip_desktop_suffix(app)
-        now = datetime.now(UTC).isoformat()
-        results: list[dict[str, object]] = []
-        for component in root.findall("component"):
-            cid_node = component.find("id")
-            if cid_node is None or cid_node.text is None:
-                continue
-            if strip_desktop_suffix(cid_node.text) != target:
-                continue
-            cid = AppId(target)
-            pkgname = component.findtext("pkgname")
-            for screenshot in component.findall(".//screenshot"):
-                for image in screenshot.findall("image"):
-                    image_type = image.attrib.get("type", "source")
-                    width = self._parse_int(image.attrib.get("width"), DEFAULT_WIDTH)
-                    height = self._parse_int(image.attrib.get("height"), DEFAULT_HEIGHT)
-                    url_text = (image.text or "").strip()
-                    if not url_text:
-                        continue
-                    full_url = (
-                        urljoin(media_base, url_text)
-                        if media_base and not url_text.startswith("http")
-                        else url_text
-                    )
+        return list(
+            iter_appstream_entries(
+                root,
+                distro="fedora",
+                source="fedora-appstream",
+                apps={strip_desktop_suffix(app)},
+            )
+        )
+
+    @staticmethod
+    def _parse_int(value: object, default: int) -> int:
+        return _parse_int(value, default)
+
+
+def iter_appstream_entries(
+    root: Element,
+    *,
+    distro: str,
+    source: str,
+    apps: set[str] | None = None,
+    notes: str | None = None,
+) -> Iterator[dict[str, object]]:
+    """Wpisy korpusu dla screenshotów komponentów katalogu AppStream (XML).
+
+    Ten sam format ma `fedora.xml.gz`, katalogi w `/usr/share/swcatalog/xml`
+    i appstream remote'ów flatpak — dlatego parser jest jeden, a `distro`/`source`
+    podaje wołający. `apps` (znormalizowane id, bez `.desktop`) zawęża wynik;
+    ``None`` = wszystkie komponenty.
+    """
+    media_base = root.attrib.get("media_baseurl", "")
+    if media_base and not media_base.endswith("/"):
+        media_base += "/"
+    now = datetime.now(UTC)
+    for component in root.findall("component"):
+        cid_node = component.find("id")
+        if cid_node is None or cid_node.text is None:
+            continue
+        cid = strip_desktop_suffix(cid_node.text)
+        if apps is not None and cid not in apps:
+            continue
+        pkgname = component.findtext("pkgname")
+        for screenshot in component.findall(".//screenshot"):
+            for image in screenshot.findall("image"):
+                image_type = image.attrib.get("type", "source")
+                width = _parse_int(image.attrib.get("width"), DEFAULT_WIDTH)
+                height = _parse_int(image.attrib.get("height"), DEFAULT_HEIGHT)
+                url_text = (image.text or "").strip()
+                if not url_text:
+                    continue
+                full_url = (
+                    urljoin(media_base, url_text)
+                    if media_base and not url_text.startswith("http")
+                    else url_text
+                )
+                try:
                     entry = construct_validated(
                         CorpusEntry,
                         {
-                            "app_id": cid,
-                            "distro": "fedora",
-                            "source": "fedora-appstream",
+                            "app_id": AppId(cid),
+                            "distro": distro,
+                            "source": source,
                             "source_url": HttpUrl(full_url),
                             "kind": "source" if image_type == "source" else "thumbnail",
                             "width": width,
@@ -114,30 +143,34 @@ class FedoraSource:
                             "sha256": "0" * 64,
                             "file": "media/unfetched.png",
                             "pkgname": pkgname,
-                            "notes": None,
+                            "notes": notes,
                         },
                         sample_rate=100,
-                    ).model_dump(mode="json")
-                    results.append(entry)
-        return results
+                    )
+                except Exception as exc:
+                    # Katalog całej dystrybucji ma wpisy, których model odrzuca
+                    # (np. miniatury >=1000px); pomijamy zamiast wywalać iterację.
+                    log_entry(20, "corpus.appstream.entry_skipped", app=cid, error=str(exc))
+                    continue
+                yield entry.model_dump(mode="json")
 
-    @staticmethod
-    def _parse_int(value: object, default: int) -> int:
-        if value is None:
-            return default
-        if isinstance(value, str) and value:
-            try:
-                return int(value)
-            except ValueError:
-                return default
+
+def _parse_int(value: object, default: int) -> int:
+    if value is None:
         return default
+    if isinstance(value, str) and value:
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
 
 
 DEFAULT_WIDTH = 1280
 DEFAULT_HEIGHT = 720
 
 
-__all__ = ["DEFAULT_HEIGHT", "DEFAULT_WIDTH", "FedoraSource"]
+__all__ = ["DEFAULT_HEIGHT", "DEFAULT_WIDTH", "FedoraSource", "iter_appstream_entries"]
 
 
 def _unused(_: Any) -> None:

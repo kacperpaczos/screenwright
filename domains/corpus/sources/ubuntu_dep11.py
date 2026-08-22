@@ -11,7 +11,9 @@ Dokumenty 1..N (komponenty):
     Screenshots[].thumbnails[]: {url (relative), width, height}
 """
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urljoin
 
 import yaml
@@ -97,79 +99,94 @@ class UbuntuDep11Source:
         except (OSError, yaml.YAMLError) as exc:
             log_entry(20, "corpus.ubuntu.parse_error", url=url, error=str(exc))
             return []
-        if not docs:
-            return []
-        try:
-            header = strict_validate(Dep11Header, docs[0])
-        except Exception as exc:
-            log_entry(20, "corpus.ubuntu.bad_header", error=str(exc))
-            return []
-        media_base = header.MediaBaseUrl
-        if not media_base.endswith("/"):
-            media_base += "/"
-        target = strip_desktop_suffix(app)
-        now = datetime.now(UTC).isoformat()
-        entries: list[dict[str, object]] = []
-        for doc in docs[1:]:
-            if not isinstance(doc, dict) or "ID" not in doc:
-                continue
-            try:
-                comp = strict_validate(Dep11Component, doc)
-            except Exception:
-                continue
-            if strip_desktop_suffix(comp.ID) != target:
-                continue
-            for shot in comp.Screenshots:
-                if shot.source_image and shot.source_image.url:
-                    url_text = shot.source_image.url
-                    full_url = (
-                        urljoin(media_base, url_text)
-                        if not url_text.startswith("http")
-                        else url_text
-                    )
-                    entries.append(
-                        CorpusEntry(
-                            app_id=AppId(target),
-                            distro="ubuntu",
-                            source="ubuntu-dep11",
-                            source_url=HttpUrl(full_url),
-                            kind="source",
-                            width=shot.source_image.width,
-                            height=shot.source_image.height,
-                            fetched=now,
-                            sha256=Sha256("0" * 64),
-                            file="media/unfetched.png",
-                            pkgname=PkgName(comp.Package) if comp.Package else None,
-                        ).model_dump(mode="json")
-                    )
-                for thumb in shot.thumbnails:
-                    if not thumb.url:
-                        continue
-                    url_text = thumb.url
-                    full_url = (
-                        urljoin(media_base, url_text)
-                        if not url_text.startswith("http")
-                        else url_text
-                    )
-                    entries.append(
-                        CorpusEntry(
-                            app_id=AppId(target),
-                            distro="ubuntu",
-                            source="ubuntu-dep11",
-                            source_url=HttpUrl(full_url),
-                            kind="thumbnail",
-                            width=thumb.width,
-                            height=thumb.height,
-                            fetched=now,
-                            sha256=Sha256("0" * 64),
-                            file="media/unfetched.png",
-                            pkgname=PkgName(comp.Package) if comp.Package else None,
-                        ).model_dump(mode="json")
-                    )
-        return entries
+        return list(
+            iter_dep11_entries(
+                docs,
+                distro="ubuntu",
+                source="ubuntu-dep11",
+                apps={strip_desktop_suffix(app)},
+            )
+        )
 
     def _catalog_url(self) -> str:
         return f"{DEP11_BASE}/{self._suite}/{self._component}/dep11/Components-{self._arch}.yml.gz"
+
+
+def iter_dep11_entries(
+    docs: list[Any],
+    *,
+    distro: str,
+    source: str,
+    apps: set[str] | None = None,
+    notes: str | None = None,
+) -> Iterator[dict[str, object]]:
+    """Wpisy korpusu dla screenshotów z dokumentów DEP-11 (nagłówek + komponenty).
+
+    Używane zarówno dla katalogu z archiwum Ubuntu (`fetch`), jak i dla plików
+    `Components-amd64.yml.gz` zebranych z wnętrza gościa. `apps` = znormalizowane
+    id (bez `.desktop`); ``None`` = wszystkie komponenty.
+    """
+    if not docs:
+        return
+    try:
+        header = strict_validate(Dep11Header, docs[0])
+    except Exception as exc:
+        log_entry(20, "corpus.ubuntu.bad_header", error=str(exc))
+        return
+    media_base = header.MediaBaseUrl
+    if not media_base.endswith("/"):
+        media_base += "/"
+    now = datetime.now(UTC)
+    for doc in docs[1:]:
+        if not isinstance(doc, dict) or "ID" not in doc:
+            continue
+        try:
+            comp = strict_validate(Dep11Component, doc)
+        except Exception:
+            continue
+        cid = strip_desktop_suffix(comp.ID)
+        if apps is not None and cid not in apps:
+            continue
+        pkg = PkgName(comp.Package) if comp.Package else None
+        for shot in comp.Screenshots:
+            images: list[tuple[str, int, int, str]] = []
+            if shot.source_image and shot.source_image.url:
+                images.append(
+                    (
+                        shot.source_image.url,
+                        shot.source_image.width,
+                        shot.source_image.height,
+                        "source",
+                    )
+                )
+            images.extend(
+                (thumb.url, thumb.width, thumb.height, "thumbnail")
+                for thumb in shot.thumbnails
+                if thumb.url
+            )
+            for url_text, width, height, kind in images:
+                full_url = (
+                    urljoin(media_base, url_text) if not url_text.startswith("http") else url_text
+                )
+                try:
+                    entry = CorpusEntry(
+                        app_id=AppId(cid),
+                        distro=distro,
+                        source=source,
+                        source_url=HttpUrl(full_url),
+                        kind=kind,
+                        width=width,
+                        height=height,
+                        fetched=now,
+                        sha256=Sha256("0" * 64),
+                        file="media/unfetched.png",
+                        pkgname=pkg,
+                        notes=notes,
+                    )
+                except Exception as exc:
+                    log_entry(20, "corpus.dep11.entry_invalid", app=cid, error=str(exc))
+                    continue
+                yield entry.model_dump(mode="json")
 
 
 __all__ = [
@@ -178,4 +195,5 @@ __all__ = [
     "Dep11Image",
     "Dep11Screenshot",
     "UbuntuDep11Source",
+    "iter_dep11_entries",
 ]

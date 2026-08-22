@@ -34,8 +34,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_capture.add_argument("--require-change", action="store_true")
 
     p_collect = sub.add_parser("collect", help="zbierz screenshoty ze źródeł")
-    p_collect.add_argument("--apps", required=True)
+    p_collect.add_argument(
+        "--source",
+        choices=["remote", "guest"],
+        default="remote",
+        help="remote = publiczne endpointy per aplikacja; guest = katalogi zebrane z kolektorów (Ansible)",
+    )
+    p_collect.add_argument(
+        "--apps", help="lista aplikacji (wymagana dla --source remote; filtr dla guest)"
+    )
     p_collect.add_argument("--distros", required=True)
+    p_collect.add_argument(
+        "--guest-dir", default="corpus/guest", help="katalog z fetch-ami Ansible"
+    )
+    p_collect.add_argument(
+        "--max-media",
+        type=int,
+        default=None,
+        help="ile mediów pobrać na hoście w tym przebiegu (guest)",
+    )
     p_collect.add_argument("--output", default="corpus")
     p_collect.add_argument("--dry-run", action="store_true")
     p_collect.add_argument(
