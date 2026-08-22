@@ -281,3 +281,17 @@ Small, unrelated to the product goals above, but worth clearing.
 - Submodules `mintinstall/`, `gnome-software/`, and `discover/` are reference code for **how** stores fetch and display images—use them when implementing collectors, presentation research, and VM checks.
 - Prefer stable app identifiers over display names when joining rows across distros.
 - “One-click” can start as one well-documented command; polish into a true installer later if needed.
+
+## 9. Faza 3 — Linux Mint i elementary OS (odłożone 2026-08-22)
+
+Świadomie odłożone; wracamy po Packerze + pełnym pobraniu mediów.
+
+- **Linux Mint** — brak oficjalnego cloud image; golden trzeba budować **Packerem
+  z ISO** (Ubiquity preseed; kruche, Mint 23 zmienia instalator). Kolektor
+  DEP-11 już istnieje (`domains/corpus/sources/mint.py`), brakuje golden do
+  weryfikacji wizualnej (mintinstall).
+- **elementary OS** — **brak nienadzorowanego instalatora** (upstream): instalacja
+  ręczna raz, potem Packer z gotowego dysku. Sklep: AppCenter (własny flatpak +
+  własne repo).
+- Override obu przez ten sam `patch_catalog` (deb/DEP-11 lub flatpak), gdy golden
+  będą gotowe. Patrz `BACKLOG.md` (retirement builderów po Packerze).

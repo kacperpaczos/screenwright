@@ -29,3 +29,6 @@ images/
 *.save.zst
 # Zebrane katalogi i pobrane media (generowane przez `cli collect`)
 /corpus/
+
+# Packer build artifacts (images, logs, rendered seeds) — never commit
+packer/build/
