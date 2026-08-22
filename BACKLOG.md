@@ -46,3 +46,44 @@ kruchy, Mint 23 go zmieni). elementary: **brak nienadzorowanego instalatora**
 Dziś media dociągane na żądanie (`cli collect --source guest --hydrate-media N`).
 Pełne (dziesiątki tys. obrazów) to zadanie wsadowe; Ubuntu deb zablokowane
 wygasłym certyfikatem `appstream.ubuntu.com` (awaria Canonical).
+
+## Retirement starego kodu matrycy (odłożone 2026-08-22 — CZĘŚCIOWO ZABLOKOWANE)
+
+Plan 7 zakłada wycofanie `domains/matrix/` po przejściu weryfikacji wizualnej na
+nowy tor. Weryfikacja cel 2 przeszła (`docs/override-deploy.md`), ale mapa
+zależności (analiza 2026-08-22) pokazuje, że **całościowe usunięcie jest jeszcze
+przedwczesne** — dwa bloki są nadal potrzebne:
+
+**NIE usuwać jeszcze (nadal używane):**
+- `domains/matrix/distro_builders/` (668 LOC) + `vm/build/install-fedora.sh`,
+  `seed-ubuntu.sh` — **budują golden images** (`fedora-ws.qcow2` itd.), których
+  weryfikacja wizualna cel 2 nadal używa (overlay na golden). Plan 7 przewiduje
+  zastąpienie **Packerem** — dopóki go nie ma, budowniczych nie ruszać.
+- `domains/matrix/backend/{virsh,ssh}.py` + `guest.py` — **prymitywy automatyki
+  VM** (VirshBackend, SshShell, wait_for_agent/shell/session). Harness
+  weryfikacji cel 2 na nich stoi. Przed retirementem: przekuć harness w repo-tool
+  (`visual-check`, plan 7 linia 72), który je formalnie „posiada".
+
+**Bezpieczne do usunięcia TERAZ (silnik run-flow, w pełni zastąpiony Ansiblem;
+tylko wewnętrzni + testowi konsumenci — analiza potwierdziła zero importów spoza
+matrycy):** `runner.py` (682), `warm_cache.py` (230), `store_proxy.py` (355),
+`domain_xml.py` (89), `drivers/` (~245), `cli/matrix_cmd.py` (309),
+`matrix-spec.json`, `vm/build/run-matrix.sh`, `vm/reports/*.json`. Wraz z ich
+testami (~3.6k LOC) i **modelami matrycowymi w kernelu współdzielonym**
+(`shared/results.py`: `PhaseTiming`, `MatrixReport`, `_BOOT_PHASES` — reszta
+pliku, `Score`/`VerificationResult`, zostaje bo używa jej `domains/verification`).
+
+**Wiring do edycji przy usuwaniu (dokładne miejsca z analizy):**
+`cli/__main__.py` (import :11, subparser :77-126, dispatch :171-174),
+`domains/__init__.py` (:3, :5 — eager import matrycy), `shared/__init__.py`
+(:8, :27, :28), `.importlinter` (:14, :20, :31, :39),
+`tests/architecture/test_boundaries.py:9` (lista `DOMAINS`),
+`tests/architecture/validate_models.py` (:10, :51-60, :67-68, :79),
+`tests/unit/test_shared.py` (:10, :86-133).
+
+**Pułapki:** `cli/collect_cmd.py` importuje `domains.corpus.guest` (INNY moduł niż
+`domains.matrix.guest` — nie mylić); `vm/build/build-keypair.sh` jest
+**współdzielony** z kolektorami (`docs/collectors.md:21`) — zostaje.
+
+Sekwencja: (1) Packer → golden; (2) `visual-check` repo-tool na backend/guest;
+(3) dopiero wtedy pełne usunięcie z distro_builders + backend + guest.
