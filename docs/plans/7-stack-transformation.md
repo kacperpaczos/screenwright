@@ -177,13 +177,17 @@ Decyzje techniczne podjęte po drodze (wszystkie udokumentowane w kodzie):
 4. **Maszyny trwałe, `managedsave` między przebiegami** (nie transient/destroy) —
    zgodnie z modelem „maszyny per cel". Warm cache z Etapu 0 tu niepotrzebny.
 
-**Faza 4 / cel 2 (increment 1, 2026-08-22):** mechanizm podmiany **działa** —
-rola `ansible/roles/deploy-override` wstrzykuje override AppStream (priority=1) do
-Fedory WS; `appstreamcli dump` (metadane sklepu) zwraca nasz URL, GNOME Software
-pobiera nasz obraz po HTTP (`docs/override-deploy.md`). Wizualne potwierdzenie w
-karuzeli wymaga obsługi chrome GNOME (domyślny wariant flatpak, modal, wygaszanie,
-cache) — polish, nie mechanizm. Retirement starego kodu matrycy nastąpi, gdy
-weryfikacja wizualna przejdzie w pełni na ten tor.
+**Faza 4 / cel 2 — ZAMKNIĘTE end-to-end (2026-08-22), także wizualnie.**
+GNOME Software 50 na Fedorze WS renderuje w karuzeli **nasz** zrzut. Dowód na
+trzech warstwach (`docs/override-deploy.md`): (1) `appstreamcli dump` daje
+dokładnie 1 zrzut = nasz; (2) GNOME Software pobiera nasz obraz (log serwera);
+(3) framebuffer — crimson 0.20 vs 0.0002 (`images/cel2/cel2-PROOF-store-shows-ours.png`).
+Kluczowe: libappstream **UNIONuje** `<screenshots>` komponentów o tym samym id, a
+`merge="replace"` jest ignorowany — więc override musi **przepisać katalog bazowy
+w miejscu** (`domains/override.patch_catalog`, `cli override --patch`); rola
+`deploy-override` robi to (pobierz→patch→odeślij) i asertuje, że komponent ma
+**dokładnie jeden** `<screenshot>` (nie union). Pozostaje retirement starego kodu
+matrycy oraz KDE Discover / snap-store tym samym torem.
 
 Pozostało: Faza 3 (Mint/elementary — brak oficjalnych cloud image'ów, wymaga
 budowy Packerem z ISO; harmonogram `systemd --user`), pełne pobranie mediów
