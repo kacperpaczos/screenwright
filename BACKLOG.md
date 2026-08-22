@@ -86,5 +86,6 @@ pliku, `Score`/`VerificationResult`, zostaje bo używa jej `domains/verification
 `domains.matrix.guest` — nie mylić); `vm/build/build-keypair.sh` jest
 **współdzielony** z kolektorami (`docs/collectors.md:21`) — zostaje.
 
-Sekwencja: (1) Packer → golden; (2) `visual-check` repo-tool na backend/guest;
-(3) dopiero wtedy pełne usunięcie z distro_builders + backend + guest.
+Pozostały gate: **Packer → golden**, dopiero wtedy usunięcie `distro_builders` +
+`install-fedora.sh`/`seed-ubuntu.sh`. `backend`/`guest` zostają na stałe (żywa
+zależność `cli visualcheck`, zrobione 2026-08-22).
