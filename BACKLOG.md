@@ -47,7 +47,17 @@ Dziś media dociągane na żądanie (`cli collect --source guest --hydrate-media
 Pełne (dziesiątki tys. obrazów) to zadanie wsadowe; Ubuntu deb zablokowane
 wygasłym certyfikatem `appstream.ubuntu.com` (awaria Canonical).
 
-## Retirement starego kodu matrycy (odłożone 2026-08-22 — CZĘŚCIOWO ZABLOKOWANE)
+## Retirement starego kodu matrycy — ZROBIONE (2026-08-23)
+
+**Zamknięte.** Silnik run-flow usunięty 2026-08-22; Anaconda Fedory
+(`distro_builders/fedora_ws.py`, `fedora_kde.py`) + wrappery `install-fedora.sh`,
+`seed-ubuntu.sh` usunięte 2026-08-23 po zweryfikowaniu wszystkich 3 goldenów z
+Packera (smoke: SSH/sklep/guest-agent/autologin/pulpit). Kod in-house VM 4 800 →
+2 341. Zostają celowo: `backend`/`guest` (prymitywy pod `cli visualcheck`),
+`distro_builders/ubuntu.py` (Packer reużywa do seed), `mint.py`/`elementary.py`
+(Faza 3, `TODO §9`). Historyczna analiza poniżej.
+
+## Retirement starego kodu matrycy (analiza 2026-08-22)
 
 Plan 7 zakłada wycofanie `domains/matrix/` po przejściu weryfikacji wizualnej na
 nowy tor. Weryfikacja cel 2 przeszła (`docs/override-deploy.md`), ale mapa
@@ -86,6 +96,6 @@ pliku, `Score`/`VerificationResult`, zostaje bo używa jej `domains/verification
 `domains.matrix.guest` — nie mylić); `vm/build/build-keypair.sh` jest
 **współdzielony** z kolektorami (`docs/collectors.md:21`) — zostaje.
 
-Pozostały gate: **Packer → golden**, dopiero wtedy usunięcie `distro_builders` +
-`install-fedora.sh`/`seed-ubuntu.sh`. `backend`/`guest` zostają na stałe (żywa
-zależność `cli visualcheck`, zrobione 2026-08-22).
+Gate zamknięty 2026-08-23: Packer buduje wszystkie 3 goldeny (zweryfikowane
+smoke'em + promowane), Anaconda Fedory + wrappery usunięte. `backend`/`guest`
+zostają na stałe (żywa zależność `cli visualcheck`).
