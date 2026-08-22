@@ -137,6 +137,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_override.add_argument("--source-size", default="640x480")
     p_override.add_argument("--catalog", action="append", default=None)
+    p_override.add_argument(
+        "--patch",
+        action="store_true",
+        help=(
+            "podmień <screenshots> komponentu w SAMYM katalogu bazowym (--out może być "
+            "tym samym plikiem co --catalog). Metoda, którą sklep faktycznie renderuje — "
+            "osobny plik override libappstream tylko UNIONuje ze zrzutami bazy."
+        ),
+    )
 
     p_serve = sub.add_parser("serve", help="lokalny serwer obrazów")
     serve_sub = p_serve.add_subparsers(dest="serve_action", required=True)

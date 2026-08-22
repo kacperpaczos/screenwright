@@ -9,6 +9,7 @@ from domains.override.catalog import (
     ElementTreeComponentFinder,
     GzipXmlCatalogLoader,
     build_override,
+    patch_catalog,
 )
 from domains.override.models import OverrideSpec
 from shared.logging import log_entry
@@ -35,6 +36,22 @@ def run_override(args: argparse.Namespace) -> int:
     except Exception as exc:
         log_entry(40, "cli.override.spec_invalid", error=str(exc))
         return 2
+
+    if getattr(args, "patch", False):
+        try:
+            patched = patch_catalog(spec, loader=GzipXmlCatalogLoader())
+        except LookupError as exc:
+            log_entry(40, "cli.override.not_found", error=str(exc))
+            return 3
+        log_entry(
+            20,
+            "cli.override.patched",
+            out=str(patched.out_path),
+            catalog=str(patched.catalog_path),
+            replaced=patched.replaced_screenshots,
+        )
+        return 0
+
     try:
         result = build_override(
             spec, loader=GzipXmlCatalogLoader(), finder=ElementTreeComponentFinder()
