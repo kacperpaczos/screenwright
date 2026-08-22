@@ -49,6 +49,37 @@ utrudnia chrome GNOME Software, nie sama podmiana:
   usługę, ale okno nie zawsze wychodzi na pierwszy plan — `virsh screenshot`
   łapie wtedy przegląd Aktywności, nie stronę sklepu.
 
+### Próba wizualna 2026-08-22 (grim → gnome-screenshot) i wnioski
+
+`grim` **nie działa na GNOME/Mutter** (wymaga `wlr-screencopy`, protokołu wlroots
+— GNOME go nie ma). Na GNOME odpowiednikiem „zrzut w sesji" jest `gnome-screenshot`
+albo D-Bus `org.gnome.Shell.Screenshot`. `grim` miałby sens dopiero, gdyby sklep
+uruchamiać pod headless kompozytorem wlroots (`cage`/`sway --headless`) — ale to
+już nie jest prawdziwe środowisko GNOME.
+
+Wykonano kilka prób na Fedorze WS. Ustalone twardo:
+- override trafia do metadanych sklepu — `appstreamcli dump <id>` zwraca nasz URL
+  (count=5), powtarzalnie, także dla aplikacji tylko-rpm;
+- w czystym przebiegu serwer mediów oddawał 200, a GNOME Software **pobrał nasz
+  obraz** (`GET /gimp-source.png`).
+
+Czego NIE udało się jeszcze złapać: piksela naszej karuzeli na zrzucie. Powody,
+w kolejności ważności:
+1. **serwer mediów w gościu musi być jednostką systemd** (`systemd-run
+   --unit=swmedia …`) — proces w tle przez SSH (`nohup`/`setsid &`) ginie z
+   zamknięciem kanału, a wtedy sklep dostaje 404 i nie ma czego pokazać;
+2. `gnome-screenshot` trzeba odpalać **w kontekście sesji** (`systemd-run --user
+   -- gnome-screenshot -f …`), nie gołym exec po SSH;
+3. świeży boot (nie `managedsave`/restore) — restore zostawia nieświeże jednostki
+   systemd i stan `/var/tmp`, co psuło serwer mediów;
+4. aplikacja tylko-rpm (wariant rpm od razu; dla dwuwariantowych sklep pokazuje
+   flatpaka), `first-run false` + `idle-delay 0` przed pierwszym startem sklepu,
+   `rm -rf ~/.cache/gnome-software`.
+
+To jest bounded harness (deterministyczny serwer + zrzut w sesji + świeży boot),
+a nie wada mechanizmu podmiany. Domknięcie = zebranie tych czterech punktów w
+jednym przebiegu i template-match z naszym znacznikiem.
+
 ### Wykonalny następny krok dla weryfikacji wizualnej
 
 Zamiast walczyć z framebufferem i fokusem: robić zrzut **w sesji** przez
