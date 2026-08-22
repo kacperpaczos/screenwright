@@ -206,15 +206,21 @@ są żywą zależnością `cli visualcheck`. Budowniczowie golden (`distro_build
 zostają do czasu Packera (jedyny otwarty gate retirementu, `BACKLOG.md`). Bramka
 lokalna zielona (277 testów, 80% cov).
 
-**Packer — Ubuntu ZWERYFIKOWANY i PROMOWANY do golden (2026-08-23).** Smoke na
-odbudowanym obrazie przeszedł w pełni: SSH (user test + klucz), gnome-software,
-snap-store, qemu-guest-agent active, graphical.target, autologin, ubuntu-desktop.
-`packer/promote.sh` podmienił golden (stary → `.bak-*`). Fedora WS/KDE
-(`fedora.pkr.hcl` + `build-fedora.sh`) — build w toku (jeden VM naraz).
-Retirement builderów po zielonej Fedorze; uwaga: Packer Ubuntu **reużywa**
-`UbuntuBuilder` (seed), więc `distro_builders/ubuntu.py` zostaje — do usunięcia
-tylko Anaconda Fedory (`fedora_ws/kde.py`) + wrappery `install-fedora.sh`/
-`seed-ubuntu.sh`.
+**Packer — WSZYSTKIE 3 goldeny ZWERYFIKOWANE i PROMOWANE (2026-08-23).**
+`ubuntu-24.04`, `fedora-ws` (GNOME Shell 50.4), `fedora-kde` (Plasma 6.7.4) —
+każdy przez smoke: SSH+user+klucz, sklep (gnome-software/snap-store/plasma-discover),
+qemu-guest-agent active, graphical.target, autologin, pakiet pulpitu.
+`packer/promote.sh` podmienił goldeny (stare → `.bak-*`). Model cloud-init dla
+Fedory (Cloud Base + dnf @^*-environment) zadziałał za pierwszym razem.
+
+**Retirement builderów ZROBIONY:** usunięto `distro_builders/fedora_ws.py`,
+`fedora_kde.py` (+ test), `install-fedora.sh`, `seed-ubuntu.sh`. Zostają: `ubuntu.py`
+(Packer reużywa go do seed), `mint.py`/`elementary.py` (Faza 3, parked). Kod
+in-house warstwy VM: 4 800 → **2 341** (reszta to prymitywy backend/guest pod
+`cli visualcheck` + buildery Fazy 3 — nie martwy kod).
+
+**Pełne pobranie mediów ZROBIONE:** 18 223 zdjęć źródłowych / 5.7 GB na hoście
+(z 18 475; ~250 to martwe URL-e upstream). `corpus/index.json` zhydratyzowany.
 
 **One-command refresh (TODO §7, zrobione):** `scripts/refresh-screenshot-db.sh`
 / `make refresh` — provision→collect→import→hydrate, idempotentne.
@@ -234,7 +240,7 @@ builderów (`distro_builders`, `install-fedora.sh`, `seed-ubuntu.sh`).
 |---|---|---|
 | Pokrycie zdjęć | aplikacje z ≥1 zdjęciem / wszystkie, per dystrybucja × format | raportowane w indeksie; cel: zgodne z tym, co pokazuje sklep |
 | Czas pełnego zebrania | od `terraform apply` do importu | < 1 h / dystrybucja |
-| Kod in-house warstwy VM | `wc -l domains/matrix vm cli/vm_cmd.py cli/visualcheck_cmd.py` | start ~4 800 → **2 965 teraz** (po retirementcie silnika) → ~1 630 po usunięciu builderów (jutro). Cel „< 500" ZREWIDOWANY: prymitywy `backend`+`guest` (~1 200) zostają celowo jako biblioteka automatyki VM dla `cli visualcheck` — realny cel to „zero martwego kodu orkiestracji matrycy", osiągnięty |
+| Kod in-house warstwy VM | `wc -l domains/matrix vm cli/vm_cmd.py cli/visualcheck_cmd.py` | start ~4 800 → **2 341** (silnik matrycy + Anaconda Fedory + wrappery usunięte). Cel „< 500" ZREWIDOWANY i osiągnięty w intencji: brak martwego kodu orkiestracji; reszta to celowe prymitywy `backend`+`guest` pod `cli visualcheck`, `distro_builders/ubuntu.py` (reużywany przez Packer) i buildery Fazy 3 (parked) |
 | Ręczne kroki w obiegu | lista w README | 0 |
 | Czas dodania dystrybucji | zmierzyć na Mint | ≤ 1 dzień (obraz + inventory + te same role) |
 
