@@ -21,8 +21,10 @@ case "$VARIANT" in
        VM_NAME="fedora-ws.qcow2" ;;
   kde) DESKTOP_ENV="@^kde-desktop-environment"; STORE_PKG="plasma-discover"
        AUTOLOGIN_CMDS='mkdir -p /etc/sddm.conf.d && printf "[Autologin]\nUser=test\nSession=plasma\n" > /etc/sddm.conf.d/autologin.conf'
-       # wygasza kreator „Welcome to Plasma" (plasma-welcome), który zasłania Discover
-       FIRSTRUN_CMDS='rm -f /etc/xdg/autostart/org.kde.plasma.welcome.desktop /etc/xdg/autostart/*plasma*welcome*.desktop /etc/xdg/autostart/*welcome*.desktop'
+       # Kreator „Welcome to Plasma" zasłania Discover. NIE jest w /etc/xdg/autostart
+       # (Plasma odpala go z pakietu przy pierwszym logowaniu, .desktop w
+       # /usr/share/applications). Najpewniejsze: usunąć pakiet — to app-liść.
+       FIRSTRUN_CMDS='dnf -y remove plasma-welcome'
        VM_NAME="fedora-kde.qcow2" ;;
   *)   echo "usage: $0 ws|kde" >&2; exit 2 ;;
 esac
@@ -91,6 +93,9 @@ echo "PACKER_RC=$rc $(date +%T)" >> "$STATUS"
 [ -f "$OUT/$VM_NAME" ] || { echo "IMAGE_MISSING" >> "$STATUS"; echo "DONE $(date +%T)" >> "$STATUS"; exit 3; }
 echo "IMAGE_SIZE=$(du -h "$OUT/$VM_NAME" | cut -f1)" >> "$STATUS"
 
+# serial-console file bywa domflushowany chwilę po wyjściu qemu — daj mu dojść,
+# inaczej marker (ostatnie linie) daje false-negative INCOMPLETE.
+sync; sleep 3
 if tr -d '\000' < "$CONSOLE" 2>/dev/null | grep -q "$DONE_MARKER"; then
   echo "CLOUD_INIT_DONE=yes" >> "$STATUS"
   if tr -d '\000' < "$CONSOLE" 2>/dev/null | grep -qiE "package_update_upgrade_install.*fail|dnf.*error|failed to install"; then
