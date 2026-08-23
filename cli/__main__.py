@@ -139,6 +139,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_vc.add_argument("--memory", type=int, default=4096)
     p_vc.add_argument("--media-port", type=int, default=8080)
     p_vc.add_argument("--threshold", type=float, default=0.03)
+    p_vc.add_argument(
+        "--ssh-timeout",
+        type=float,
+        default=120.0,
+        help="ile sekund czekać na SSH gościa (Fedora KDE bootuje wolniej — daj 300)",
+    )
     p_vc.add_argument("--libvirt-uri", default="qemu:///session")
     p_vc.add_argument(
         "--work-dir", default=str(Path.home() / ".local/share/screenwright/images/vc")
