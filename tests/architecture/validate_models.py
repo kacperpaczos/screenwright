@@ -25,7 +25,6 @@ def _all_pydantic_models(module) -> list[type]:
 
 
 def test_corpus_models_have_json_schema() -> None:
-
     found = [
         corpus_models.CorpusEntry,
         corpus_models.CorpusIndex,
@@ -36,7 +35,6 @@ def test_corpus_models_have_json_schema() -> None:
 
 
 def test_capture_models_have_json_schema() -> None:
-
     found = [
         capture_models.CaptureSpec,
         capture_models.CaptureResult,

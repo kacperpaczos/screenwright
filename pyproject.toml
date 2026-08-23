@@ -23,7 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "types-PyYAML",
-    "ruff==0.6.5",
+    "ruff==0.16.3",
     "mypy==1.11.2",
     "pytest==8.3.3",
     "pytest-cov==5.0.0",
@@ -96,8 +96,6 @@ markers = [
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:lxml.*",
-    "ignore::starlette.exceptions.StarletteDeprecationWarning",
-    "ignore::DeprecationWarning:starlette.*",
 ]
 
 [tool.coverage.run]
