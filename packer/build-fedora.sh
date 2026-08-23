@@ -21,10 +21,11 @@ case "$VARIANT" in
        VM_NAME="fedora-ws.qcow2" ;;
   kde) DESKTOP_ENV="@^kde-desktop-environment"; STORE_PKG="plasma-discover"
        AUTOLOGIN_CMDS='mkdir -p /etc/sddm.conf.d && printf "[Autologin]\nUser=test\nSession=plasma\n" > /etc/sddm.conf.d/autologin.conf'
-       # Kreator „Welcome to Plasma" zasłania Discover. NIE jest w /etc/xdg/autostart
-       # (Plasma odpala go z pakietu przy pierwszym logowaniu, .desktop w
-       # /usr/share/applications). Najpewniejsze: usunąć pakiet — to app-liść.
-       FIRSTRUN_CMDS='dnf -y remove plasma-welcome'
+       # Ekran „Welcome to Plasma / Begin Setup" to OOBE pakietu `plasma-setup`
+       # (usługa plasma-setup.service autologuje usera `plasma-setup` na seat0
+       # PRZED naszym autologinem `test` i zasłania Discover). To NIE plasma-welcome.
+       # Najpewniejsze: usunąć oba pakiety-liście.
+       FIRSTRUN_CMDS='dnf -y remove plasma-setup plasma-welcome'
        VM_NAME="fedora-kde.qcow2" ;;
   *)   echo "usage: $0 ws|kde" >&2; exit 2 ;;
 esac
