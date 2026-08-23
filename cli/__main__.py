@@ -167,7 +167,8 @@ def dispatch(args: argparse.Namespace) -> int:
             return run_serve_stop()
         return run_serve_status(args)
     if args.command == "vm":
-        return args.func(args)
+        rc: int = args.func(args)
+        return rc
     if args.command == "visualcheck":
         from cli.visualcheck_cmd import run_visualcheck
 

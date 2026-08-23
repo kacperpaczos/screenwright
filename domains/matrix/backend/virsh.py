@@ -176,8 +176,12 @@ class VirshBackend:
                 break
             time.sleep(min(0.2, max(0.0, remaining)))
 
-        stdout_bytes = base64.b64decode(info.get("out-data", "")) if info.get("out-data") else b""
-        stderr_bytes = base64.b64decode(info.get("err-data", "")) if info.get("err-data") else b""
+        stdout_bytes = (
+            base64.b64decode(str(info.get("out-data", ""))) if info.get("out-data") else b""
+        )
+        stderr_bytes = (
+            base64.b64decode(str(info.get("err-data", ""))) if info.get("err-data") else b""
+        )
         exitcode = info.get("exitcode", 0)
 
         if exitcode != 0:

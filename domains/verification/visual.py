@@ -23,8 +23,9 @@ if TYPE_CHECKING:
 def dominant_color(image: Path) -> tuple[int, int, int]:
     """Średni (dominujący dla jednolitego markera) kolor RGB obrazu."""
     with Image.open(image) as im:
-        r, g, b = im.convert("RGB").resize((1, 1)).getpixel((0, 0))
-    return int(r), int(g), int(b)
+        px = im.convert("RGB").resize((1, 1)).getpixel((0, 0))
+    assert isinstance(px, tuple)  # obraz RGB → (r, g, b)
+    return int(px[0]), int(px[1]), int(px[2])
 
 
 def color_fraction(screenshot: Path, rgb: tuple[int, int, int], tol: int = 45) -> float:
