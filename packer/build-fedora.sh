@@ -20,12 +20,16 @@ case "$VARIANT" in
        FIRSTRUN_CMDS='rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop /etc/xdg/autostart/org.gnome.Software.desktop'
        VM_NAME="fedora-ws.qcow2" ;;
   kde) DESKTOP_ENV="@^kde-desktop-environment"; STORE_PKG="plasma-discover"
-       AUTOLOGIN_CMDS='mkdir -p /etc/sddm.conf.d && printf "[Autologin]\nUser=test\nSession=plasma\n" > /etc/sddm.conf.d/autologin.conf'
-       # Ekran „Welcome to Plasma / Begin Setup" to OOBE pakietu `plasma-setup`
-       # (usługa plasma-setup.service autologuje usera `plasma-setup` na seat0
-       # PRZED naszym autologinem `test` i zasłania Discover). To NIE plasma-welcome.
-       # Najpewniejsze: usunąć oba pakiety-liście.
-       FIRSTRUN_CMDS='dnf -y remove plasma-setup plasma-welcome'
+       # Fedora 44 KDE używa plasma-login-managera (plasmalogin.service), który
+       # czyta /etc/plasmalogin.conf.d/ — konfiguracja w /etc/sddm.conf.d/ jest
+       # IGNOROWANA (zweryfikowane; maszyna stawała na ekranie logowania). Piszemy
+       # w oba miejsca + wyłączamy lock/blank (deterministyczny zrzut).
+       AUTOLOGIN_CMDS='mkdir -p /etc/plasmalogin.conf.d /etc/sddm.conf.d; printf "[Autologin]\nUser=test\nSession=plasma\n" | tee /etc/plasmalogin.conf.d/autologin.conf /etc/sddm.conf.d/autologin.conf >/dev/null; mkdir -p /home/test/.config; printf "[Daemon]\nAutolock=false\nLockOnResume=false\n" > /home/test/.config/kscreenlockerrc; chown -R test:test /home/test/.config'
+       # Autologin sam nie wystarcza: initial-setup i plasma-setup.service
+       # PRZEJMUJĄ seat0 przed autologinem (kreator „Welcome to Plasma", sesja
+       # usera plasma-setup uid 980). Trzeba je wyłączyć i usunąć pakiety-liście
+       # (plasma-setup = OOBE, plasma-welcome = okno powitalne jak gnome-tour).
+       FIRSTRUN_CMDS='systemctl disable initial-setup.service initial-setup-reconfiguration.service plasma-setup.service || true; dnf -y remove plasma-setup plasma-welcome || true'
        VM_NAME="fedora-kde.qcow2" ;;
   *)   echo "usage: $0 ws|kde" >&2; exit 2 ;;
 esac
