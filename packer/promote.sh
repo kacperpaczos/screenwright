@@ -4,7 +4,10 @@
 #          (nazwa docelowa = basename źródła)
 set -uo pipefail
 SRC="${1:-}"
-[ -n "$SRC" ] && [ -f "$SRC" ] || { echo "usage: $0 <path/to/built.qcow2>  (plik musi istnieć)" >&2; exit 2; }
+if [ -z "$SRC" ] || [ ! -f "$SRC" ]; then
+    echo "usage: $0 <path/to/built.qcow2>  (plik musi istnieć)" >&2
+    exit 2
+fi
 GOLDEN_DIR="${SCREENWRIGHT_IMAGE_ROOT:-$HOME/.local/share/screenwright/images}/golden"
 NAME="$(basename "$SRC")"
 DST="$GOLDEN_DIR/$NAME"
