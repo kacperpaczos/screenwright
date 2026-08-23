@@ -16,9 +16,13 @@ VARIANT="${1:-}"
 case "$VARIANT" in
   ws)  DESKTOP_ENV="@^workstation-product-environment"; STORE_PKG="gnome-software"
        AUTOLOGIN_CMDS='mkdir -p /etc/gdm && printf "[daemon]\nAutomaticLoginEnable=True\nAutomaticLogin=test\n" > /etc/gdm/custom.conf'
+       # wygasza gnome-initial-setup (kreator pierwszego logowania zasłania sklep)
+       FIRSTRUN_CMDS='rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop /etc/xdg/autostart/org.gnome.Software.desktop'
        VM_NAME="fedora-ws.qcow2" ;;
   kde) DESKTOP_ENV="@^kde-desktop-environment"; STORE_PKG="plasma-discover"
        AUTOLOGIN_CMDS='mkdir -p /etc/sddm.conf.d && printf "[Autologin]\nUser=test\nSession=plasma\n" > /etc/sddm.conf.d/autologin.conf'
+       # wygasza kreator „Welcome to Plasma" (plasma-welcome), który zasłania Discover
+       FIRSTRUN_CMDS='rm -f /etc/xdg/autostart/org.kde.plasma.welcome.desktop /etc/xdg/autostart/*plasma*welcome*.desktop /etc/xdg/autostart/*welcome*.desktop'
        VM_NAME="fedora-kde.qcow2" ;;
   *)   echo "usage: $0 ws|kde" >&2; exit 2 ;;
 esac
@@ -68,6 +72,7 @@ runcmd:
   - systemctl enable sshd qemu-guest-agent
   - systemctl set-default graphical.target
   - $AUTOLOGIN_CMDS
+  - $FIRSTRUN_CMDS
 power_state:
   mode: poweroff
   timeout: 180

@@ -300,3 +300,19 @@ Small, unrelated to the product goals above, but worth clearing.
   własne repo).
 - Override obu przez ten sam `patch_catalog` (deb/DEP-11 lub flatpak), gdy golden
   będą gotowe. Patrz `BACKLOG.md` (retirement builderów po Packerze).
+
+## 10. Regresja cel-2 na Packerowych goldenach (2026-08-23)
+
+Po migracji goldenów na Packera — potwierdzić, że podmiana zrzutu (`cli visualcheck`)
+działa na nowych obrazach. Priorytet właściciela: **Fedora KDE (Discover) i Fedora
+GNOME (Software)**.
+
+- [x] **Fedora GNOME** (fedora-ws) — `visualcheck` zielony (`renders_ours=true`, 0.13).
+- [~] **Fedora KDE** (fedora-kde) — pierwszy przebieg pokazał blokadę: golden bootuje
+      do kreatora „Welcome to Plasma" (plasma-welcome), który zasłania Discover.
+      Fix: `build-fedora.sh` wygasza autostart plasma-welcome (i gnome-initial-setup
+      dla ws) w cloud-init; rebuild + re-verify (w toku 2026-08-23).
+- [ ] **Ubuntu (deb/DEP-11)** — ODŁOŻONE. Warstwa danych potwierdzona
+      (`appstreamcli dump` = nasz zrzut), ale piksel blokuje środowiskowo
+      (wygasły cert `appstream.ubuntu.com` + problem gnome-software z mediami na
+      golden Ubuntu). Nie priorytet właściciela.
