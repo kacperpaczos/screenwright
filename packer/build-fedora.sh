@@ -16,9 +16,20 @@ VARIANT="${1:-}"
 case "$VARIANT" in
   ws)  DESKTOP_ENV="@^workstation-product-environment"; STORE_PKG="gnome-software"
        AUTOLOGIN_CMDS='mkdir -p /etc/gdm && printf "[daemon]\nAutomaticLoginEnable=True\nAutomaticLogin=test\n" > /etc/gdm/custom.conf'
+       # wygasza gnome-initial-setup (kreator pierwszego logowania zasłania sklep)
+       FIRSTRUN_CMDS='rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop /etc/xdg/autostart/org.gnome.Software.desktop'
        VM_NAME="fedora-ws.qcow2" ;;
   kde) DESKTOP_ENV="@^kde-desktop-environment"; STORE_PKG="plasma-discover"
-       AUTOLOGIN_CMDS='mkdir -p /etc/sddm.conf.d && printf "[Autologin]\nUser=test\nSession=plasma\n" > /etc/sddm.conf.d/autologin.conf'
+       # Fedora 44 KDE używa plasma-login-managera (plasmalogin.service), który
+       # czyta /etc/plasmalogin.conf.d/ — konfiguracja w /etc/sddm.conf.d/ jest
+       # IGNOROWANA (zweryfikowane; maszyna stawała na ekranie logowania). Piszemy
+       # w oba miejsca + wyłączamy lock/blank (deterministyczny zrzut).
+       AUTOLOGIN_CMDS='mkdir -p /etc/plasmalogin.conf.d /etc/sddm.conf.d; printf "[Autologin]\nUser=test\nSession=plasma\n" | tee /etc/plasmalogin.conf.d/autologin.conf /etc/sddm.conf.d/autologin.conf >/dev/null; mkdir -p /home/test/.config; printf "[Daemon]\nAutolock=false\nLockOnResume=false\n" > /home/test/.config/kscreenlockerrc; chown -R test:test /home/test/.config'
+       # Autologin sam nie wystarcza: initial-setup i plasma-setup.service
+       # PRZEJMUJĄ seat0 przed autologinem (kreator „Welcome to Plasma", sesja
+       # usera plasma-setup uid 980). Trzeba je wyłączyć i usunąć pakiety-liście
+       # (plasma-setup = OOBE, plasma-welcome = okno powitalne jak gnome-tour).
+       FIRSTRUN_CMDS='systemctl disable initial-setup.service initial-setup-reconfiguration.service plasma-setup.service || true; dnf -y remove plasma-setup plasma-welcome || true'
        VM_NAME="fedora-kde.qcow2" ;;
   *)   echo "usage: $0 ws|kde" >&2; exit 2 ;;
 esac
@@ -68,6 +79,7 @@ runcmd:
   - systemctl enable sshd qemu-guest-agent
   - systemctl set-default graphical.target
   - $AUTOLOGIN_CMDS
+  - $FIRSTRUN_CMDS
 power_state:
   mode: poweroff
   timeout: 180
@@ -86,6 +98,9 @@ echo "PACKER_RC=$rc $(date +%T)" >> "$STATUS"
 [ -f "$OUT/$VM_NAME" ] || { echo "IMAGE_MISSING" >> "$STATUS"; echo "DONE $(date +%T)" >> "$STATUS"; exit 3; }
 echo "IMAGE_SIZE=$(du -h "$OUT/$VM_NAME" | cut -f1)" >> "$STATUS"
 
+# serial-console file bywa domflushowany chwilę po wyjściu qemu — daj mu dojść,
+# inaczej marker (ostatnie linie) daje false-negative INCOMPLETE.
+sync; sleep 3
 if tr -d '\000' < "$CONSOLE" 2>/dev/null | grep -q "$DONE_MARKER"; then
   echo "CLOUD_INIT_DONE=yes" >> "$STATUS"
   if tr -d '\000' < "$CONSOLE" 2>/dev/null | grep -qiE "package_update_upgrade_install.*fail|dnf.*error|failed to install"; then

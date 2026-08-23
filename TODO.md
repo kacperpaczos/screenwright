@@ -300,3 +300,20 @@ Small, unrelated to the product goals above, but worth clearing.
   własne repo).
 - Override obu przez ten sam `patch_catalog` (deb/DEP-11 lub flatpak), gdy golden
   będą gotowe. Patrz `BACKLOG.md` (retirement builderów po Packerze).
+
+## 10. Regresja cel-2 na Packerowych goldenach (2026-08-23)
+
+Po migracji goldenów na Packera — potwierdzić, że podmiana zrzutu (`cli visualcheck`)
+działa na nowych obrazach. Priorytet właściciela: **Fedora KDE (Discover) i Fedora
+GNOME (Software)**.
+
+- [x] **Fedora GNOME** (fedora-ws) — `visualcheck` zielony (`renders_ours=true`, 0.13).
+- [x] **Fedora KDE** (fedora-kde) — visualcheck ZIELONY (renders_ours=true, crimson
+      0.16), Discover pokazuje nasz zrzut. Naprawa autologinu (Fedora 44 KDE): menedżer
+      to `plasmalogin`, czyta `/etc/plasmalogin.conf.d/` (nie `/etc/sddm.conf.d/`, które
+      jest ignorowane) + trzeba wyłączyć `initial-setup` i `plasma-setup` (OOBE przejmuje
+      seat0) + `kscreenlockerrc` off. (2026-08-23)
+- [ ] **Ubuntu (deb/DEP-11)** — ODŁOŻONE. Warstwa danych potwierdzona
+      (`appstreamcli dump` = nasz zrzut), ale piksel blokuje środowiskowo
+      (wygasły cert `appstream.ubuntu.com` + problem gnome-software z mediami na
+      golden Ubuntu). Nie priorytet właściciela.

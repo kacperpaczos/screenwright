@@ -47,6 +47,7 @@ if [ ! -f "$OUT/ubuntu-24.04.qcow2" ]; then
 fi
 echo "IMAGE_SIZE=$(du -h "$OUT/ubuntu-24.04.qcow2" | cut -f1)" >> "$STATUS"
 
+sync; sleep 3
 # Twardy warunek kompletności: marker cloud-init w logu konsoli.
 if tr -d '\000' < "$CONSOLE" 2>/dev/null | grep -q "$DONE_MARKER"; then
     echo "CLOUD_INIT_DONE=yes" >> "$STATUS"

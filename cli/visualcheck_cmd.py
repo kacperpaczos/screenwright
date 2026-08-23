@@ -149,7 +149,9 @@ def run_visualcheck(args: argparse.Namespace) -> int:
         cleanup()
         return 4
     try:
-        waits = GuestWaits()
+        # Fedora KDE (Plasma) potrafi wstać wolniej — sshd bywa gotowy > 120 s.
+        ssh_timeout = float(getattr(args, "ssh_timeout", 120.0) or 120.0)
+        waits = GuestWaits(shell_timeout=ssh_timeout, agent_timeout=max(180.0, ssh_timeout))
         wait_for_agent(backend, name, waits=waits)
         wait_for_shell(shell, waits=waits)
         try:
